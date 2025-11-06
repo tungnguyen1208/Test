@@ -12,9 +12,10 @@ builder.Services.AddDbContext<SupabaseDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 // ✅ Cấu hình JWT Authentication
-var jwtKey = builder.Configuration["Jwt:Key"];
-var jwtIssuer = builder.Configuration["Jwt:Issuer"];
-var jwtAudience = builder.Configuration["Jwt:Audience"];
+var defaultKey = "your-secret-key-here-minimum-32-characters-long-for-security";
+var jwtKey = builder.Configuration["Jwt:Key"] ?? defaultKey;
+var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "toeic-app";
+var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "toeic-users";
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -30,6 +31,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateLifetime = true,
             ClockSkew = TimeSpan.Zero
         };
+        options.RequireHttpsMetadata = false;
+        options.SaveToken = true;
     });
 
 // ✅ Thêm Authorization

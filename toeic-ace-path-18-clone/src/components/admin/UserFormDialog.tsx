@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+import { Loader2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -26,72 +27,122 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { AdminUser } from "@/services/api";
 
-const userSchema = z.object({
-  name: z.string().min(2, "Tên phải có ít nhất 2 ký tự"),
-  email: z.string().email("Email không hợp lệ"),
-  level: z.enum(["A1", "A2", "B1", "B2", "C1", "C2"]),
-  status: z.enum(["active", "inactive"]),
-  password: z.string().min(6, "Mật khẩu phải có ít nhất 6 ký tự").optional(),
-});
+const userSchema = z
+  .object({
+    hoTen: z.string().min(2, "Ho ten phai co it nhat 2 ky tu."),
+    email: z.string().email("Email khong hop le."),
+    vaiTro: z.enum(["User", "Admin"]).default("User"),
+    soDienThoai: z.string().optional(),
+    matKhau: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.soDienThoai && data.soDienThoai.trim().length > 0 && data.soDienThoai.trim().length < 8) {
+      ctx.addIssue({
+        path: ["soDienThoai"],
+        code: z.ZodIssueCode.custom,
+        message: "So dien thoai phai co it nhat 8 ky tu.",
+      });
+    }
+    if (data.matKhau && data.matKhau.trim().length > 0 && data.matKhau.trim().length < 6) {
+      ctx.addIssue({
+        path: ["matKhau"],
+        code: z.ZodIssueCode.custom,
+        message: "Mat khau phai co it nhat 6 ky tu.",
+      });
+    }
+  });
 
-type UserFormData = z.infer<typeof userSchema>;
+export type UserFormValues = z.infer<typeof userSchema>;
 
 interface UserFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  user?: {
-    id: number;
-    name: string;
-    email: string;
-    level: string;
-    status: string;
-  } | null;
-  onSubmit: (data: UserFormData) => void;
+  user: AdminUser | null;
+  onSubmit: (data: UserFormValues, isEditing: boolean) => Promise<void> | void;
 }
 
+const normalizeRole = (role?: string | null): "User" | "Admin" => {
+  if (!role) return "User";
+  return role.trim().toLowerCase() === "admin" ? "Admin" : "User";
+};
+
 export function UserFormDialog({ open, onOpenChange, user, onSubmit }: UserFormDialogProps) {
-  const isEditing = !!user;
-  
-  const form = useForm<UserFormData>({
+  const isEditing = useMemo(() => Boolean(user), [user]);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const form = useForm<UserFormValues>({
     resolver: zodResolver(userSchema),
     defaultValues: {
-      name: user?.name || "",
-      email: user?.email || "",
-      level: (user?.level as any) || "A1",
-      status: (user?.status as any) || "active",
-      password: "",
+      hoTen: "",
+      email: "",
+      vaiTro: "User",
+      soDienThoai: "",
+      matKhau: "",
     },
   });
 
-  const handleSubmit = (data: UserFormData) => {
-    if (isEditing && !data.password) {
-      delete data.password;
+  useEffect(() => {
+    if (!open) {
+      form.reset({
+        hoTen: "",
+        email: "",
+        vaiTro: "User",
+        soDienThoai: "",
+        matKhau: "",
+      });
+      setFormError(null);
+      return;
     }
-    onSubmit(data);
-    form.reset();
-    onOpenChange(false);
+
+    const nextValues: UserFormValues = {
+      hoTen: user?.hoTen ?? "",
+      email: user?.email ?? "",
+      vaiTro: normalizeRole(user?.vaiTro),
+      soDienThoai: user?.soDienThoai ?? "",
+      matKhau: "",
+    };
+    form.reset(nextValues);
+    setFormError(null);
+  }, [open, user, form]);
+
+  const handleSubmit = async (values: UserFormValues) => {
+    if (!isEditing && (!values.matKhau || values.matKhau.trim().length === 0)) {
+      form.setError("matKhau", { type: "manual", message: "Mat khau la bat buoc khi tao nguoi dung moi." });
+      return;
+    }
+
+    setSubmitting(true);
+    setFormError(null);
+    try {
+      await onSubmit(values, isEditing);
+      onOpenChange(false);
+    } catch (error: any) {
+      setFormError(error?.message || "Khong the luu nguoi dung. Vui long thu lai.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
+    <Dialog open={open} onOpenChange={(nextOpen) => !submitting && onOpenChange(nextOpen)}>
+      <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
-          <DialogTitle>
-            {isEditing ? "Chỉnh sửa người dùng" : "Thêm người dùng mới"}
-          </DialogTitle>
+          <DialogTitle>{isEditing ? "Chinh sua nguoi dung" : "Them nguoi dung moi"}</DialogTitle>
         </DialogHeader>
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
             <FormField
               control={form.control}
-              name="name"
+              name="hoTen"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Họ tên</FormLabel>
+                  <FormLabel>Ho ten</FormLabel>
                   <FormControl>
-                    <Input placeholder="Nhập họ tên..." {...field} />
+                    <Input placeholder="Nhap ho ten" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -105,87 +156,86 @@ export function UserFormDialog({ open, onOpenChange, user, onSubmit }: UserFormD
                 <FormItem>
                   <FormLabel>Email</FormLabel>
                   <FormControl>
-                    <Input placeholder="Nhập email..." type="email" {...field} />
+                    <Input placeholder="Nhap email" type="email" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
             />
 
-            <FormField
-              control={form.control}
-              name="level"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Cấp độ</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+            <div className="grid gap-4 md:grid-cols-2">
+              <FormField
+                control={form.control}
+                name="vaiTro"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Vai tro</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Chon vai tro" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="User">User</SelectItem>
+                        <SelectItem value="Admin">Admin</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="soDienThoai"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>So dien thoai</FormLabel>
                     <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Chọn cấp độ" />
-                      </SelectTrigger>
+                      <Input placeholder="Nhap so dien thoai (neu co)" {...field} />
                     </FormControl>
-                    <SelectContent>
-                      <SelectItem value="A1">A1 - Sơ cấp</SelectItem>
-                      <SelectItem value="A2">A2 - Cơ bản</SelectItem>
-                      <SelectItem value="B1">B1 - Trung cấp</SelectItem>
-                      <SelectItem value="B2">B2 - Trung cấp cao</SelectItem>
-                      <SelectItem value="C1">C1 - Nâng cao</SelectItem>
-                      <SelectItem value="C2">C2 - Thành thạo</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
 
             <FormField
               control={form.control}
-              name="status"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Trạng thái</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Chọn trạng thái" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="active">Hoạt động</SelectItem>
-                      <SelectItem value="inactive">Không hoạt động</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="password"
+              name="matKhau"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>
-                    Mật khẩu {isEditing && "(để trống nếu không đổi)"}
+                    {isEditing ? "Mat khau moi (bo trong neu giu nguyen)" : "Mat khau"}
                   </FormLabel>
                   <FormControl>
-                    <Input
-                      placeholder={isEditing ? "Nhập mật khẩu mới..." : "Nhập mật khẩu..."}
-                      type="password"
-                      {...field}
-                    />
+                    <Input placeholder="Nhap mat khau" type="password" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
             />
 
+            {formError && (
+              <p className="text-sm text-destructive" role="alert">
+                {formError}
+              </p>
+            )}
+
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-                Hủy
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
+                Huy
               </Button>
-              <Button type="submit">
-                {isEditing ? "Cập nhật" : "Tạo mới"}
+              <Button type="submit" disabled={submitting}>
+                {submitting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Dang luu...
+                  </>
+                ) : (
+                  isEditing ? "Cap nhat" : "Tao moi"
+                )}
               </Button>
             </DialogFooter>
           </form>
@@ -194,3 +244,4 @@ export function UserFormDialog({ open, onOpenChange, user, onSubmit }: UserFormD
     </Dialog>
   );
 }
+

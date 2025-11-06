@@ -37,6 +37,13 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem("authToken"));
   const [loading, setLoading] = useState(true);
 
+  const clearSession = useCallback(() => {
+    apiService.logout();
+    setToken(null);
+    setUser(null);
+    setLoading(false);
+  }, []);
+
   const refreshProfile = useCallback(async () => {
     try {
       if (!localStorage.getItem("authToken")) return null;
@@ -48,10 +55,14 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       }
       return remoteUser;
     } catch (err) {
+      const maybeError = err as any;
+      if (maybeError?.status === 401 || maybeError?.status === 403) {
+        clearSession();
+      }
       // Swallow: we can still use cached user
       return null;
     }
-  }, []);
+  }, [clearSession]);
 
   useEffect(() => {
     const storedToken = localStorage.getItem("authToken");
@@ -67,7 +78,18 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       if (storedToken) await refreshProfile();
       setLoading(false);
     })();
-  }, []);
+  }, [refreshProfile]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleUnauthorized = () => {
+      clearSession();
+    };
+    window.addEventListener("api:unauthorized", handleUnauthorized);
+    return () => {
+      window.removeEventListener("api:unauthorized", handleUnauthorized);
+    };
+  }, [clearSession]);
 
   const login = useCallback(async (email: string, password: string) => {
     setLoading(true);
@@ -79,7 +101,10 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       const fetched = await refreshProfile();
       const nextUser = fetched ?? response.user ?? getStoredUser();
       setUser(nextUser ?? null);
-      return response;
+      return {
+        ...response,
+        user: nextUser ?? response.user,
+      };
     } catch (error) {
       throw error;
     } finally {
@@ -88,10 +113,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   }, [refreshProfile]);
 
   const logout = useCallback(() => {
-    apiService.logout();
-    setToken(null);
-    setUser(null);
-  }, []);
+    clearSession();
+  }, [clearSession]);
 
   const changePassword = useCallback(
     async (currentPassword: string, newPassword: string, confirmPassword?: string) => {

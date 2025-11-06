@@ -80,7 +80,9 @@ const UserProgressDashboard = () => {
 
   if (!dashboardData) return null;
 
-  const completionRate = Math.round((dashboardData.completedExercises / dashboardData.totalExercises) * 100);
+  const completionRate = dashboardData.totalExercises > 0
+    ? Math.round((dashboardData.completedExercises / dashboardData.totalExercises) * 100)
+    : 0;
 
   return (
     <div className="space-y-6">

@@ -1,24 +1,63 @@
-import { ReactNode } from "react";
+import { ReactNode, useMemo } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 
 interface RequireAuthProps {
   children: ReactNode;
+  roles?: string[];
+  redirectTo?: string;
+  forbiddenRedirect?: string;
 }
 
-const RequireAuth = ({ children }: RequireAuthProps) => {
-  const { isAuthenticated, loading } = useAuth();
+const resolveRole = (user: Record<string, unknown> | null | undefined): string | null => {
+  if (!user || typeof user !== "object") return null;
+  const candidates = ["vai_tro", "vaiTro", "VaiTro", "role", "Role"];
+  for (const key of candidates) {
+    if (Object.prototype.hasOwnProperty.call(user, key)) {
+      const value = (user as Record<string, unknown>)[key];
+      if (typeof value === "string" && value.trim().length > 0) {
+        return value.trim();
+      }
+    }
+  }
+  return null;
+};
+
+const RequireAuth = ({
+  children,
+  roles,
+  redirectTo = "/login",
+  forbiddenRedirect = "/",
+}: RequireAuthProps) => {
+  const { isAuthenticated, loading, user } = useAuth();
   const location = useLocation();
 
+  const normalizedRole = useMemo(() => {
+    const role = resolveRole(user);
+    return role ? role.toLowerCase() : null;
+  }, [user]);
+
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center text-muted-foreground">Đang tải...</div>;
+    return (
+      <div className="flex min-h-screen items-center justify-center text-muted-foreground">
+        Dang tai...
+      </div>
+    );
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace state={{ from: location }} />;
+    return <Navigate to={redirectTo} replace state={{ from: location }} />;
+  }
+
+  if (roles && roles.length > 0) {
+    const allowed = roles.some((role) => role.toLowerCase() === normalizedRole);
+    if (!allowed) {
+      return <Navigate to={forbiddenRedirect} replace />;
+    }
   }
 
   return <>{children}</>;
 };
 
 export default RequireAuth;
+

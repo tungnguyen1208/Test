@@ -50,6 +50,7 @@ export interface Submission {
 }
 
 export interface LearningPlan {
+  exerciseId: any;
   planId: string;
   lessonId: string | null;
   title: string;
@@ -96,6 +97,33 @@ export interface DashboardStats {
   studyHours: number;
   progress: DashboardProgress;
   recentResults: RecentResult[];
+}
+
+export interface AdminUser {
+  maNd: string;
+  hoTen: string;
+  email: string;
+  vaiTro?: string | null;
+  soDienThoai?: string | null;
+  ngayDangKy?: string | null;
+  lanDangNhapCuoi?: string | null;
+  anhDaiDien?: string | null;
+}
+
+export interface AdminUserCreatePayload {
+  hoTen: string;
+  email: string;
+  matKhau: string;
+  vaiTro?: string;
+  soDienThoai?: string;
+}
+
+export interface AdminUserUpdatePayload {
+  hoTen?: string;
+  email?: string;
+  matKhau?: string;
+  vaiTro?: string;
+  soDienThoai?: string | null;
 }
 
 // Auth (VN) types
@@ -249,6 +277,16 @@ export class ApiService {
     this.token = localStorage.getItem('authToken');
   }
 
+  private broadcastUnauthorized(): void {
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      try {
+        window.dispatchEvent(new CustomEvent('api:unauthorized'));
+      } catch (error) {
+        console.warn('Failed to emit unauthorized event', error);
+      }
+    }
+  }
+
   // ---- Authenticated user profile ----
   async getProfile(): Promise<any> {
     // Prefer canonical backend route first
@@ -273,6 +311,7 @@ export class ApiService {
       this.token = persisted;
     }
     const authHeader = this.token ? { Authorization: `Bearer ${this.token}` } : {};
+    const usedAuthHeader = Boolean((authHeader as Record<string, string>).Authorization);
     const config: RequestInit = {
       headers: {
         'Content-Type': 'application/json',
@@ -289,6 +328,10 @@ export class ApiService {
       const contentType = response.headers.get('content-type') ?? '';
 
       if (!response.ok) {
+        if ((response.status === 401 || response.status === 403) && usedAuthHeader) {
+          this.logout();
+          this.broadcastUnauthorized();
+        }
         let errorPayload: unknown = null;
         try {
           if (contentType.includes('application/json')) {
@@ -359,7 +402,7 @@ export class ApiService {
     if (['completed', 'hoàn thành', 'hoan thanh'].includes(normalized)) {
       return 'Completed';
     }
-    if (['inprogress', 'in-progress', 'đang học', 'dang hoc', 'đã mở khóa', 'da mo khoa', 'đã mở khoá', 'da mo khoá'].includes(normalized)) {
+  if (['inprogress', 'in-progress', 'in progress', 'đang học', 'dang hoc', 'đã mở khóa', 'da mo khoa', 'đã mở khoá', 'da mo khoá'].includes(normalized)) {
       return 'InProgress';
     }
     return 'Pending';
@@ -370,18 +413,25 @@ export class ApiService {
     const start = raw?.startTime ?? raw?.StartTime ?? raw?.ngayHoc ?? raw?.NgayHoc;
     const end = raw?.endTime ?? raw?.EndTime;
     return {
-      planId: String(planId),
-      lessonId: raw?.lessonId ?? raw?.LessonId ?? raw?.maBai ?? raw?.MaBai ?? null,
-      title: raw?.title ?? raw?.Title ?? raw?.tenBai ?? raw?.TenBai ?? 'Bài học',
-      description: raw?.description ?? raw?.Description ?? raw?.moTa ?? raw?.MoTa ?? null,
-      status: this.normalizePlanStatus(raw?.status ?? raw?.Status),
-      startTime: typeof start === 'string' && start ? start : new Date().toISOString(),
-      endTime: typeof end === 'string' && end ? end : new Date().toISOString(),
-      contentType: raw?.contentType ?? raw?.ContentType ?? raw?.loaiNoiDung ?? raw?.LoaiNoiDung ?? null,
-      progressPercent: typeof raw?.progressPercent === 'number'
-        ? raw.progressPercent
-        : (typeof raw?.ProgressPercent === 'number' ? raw.ProgressPercent : undefined),
-    };
+  planId: String(planId),
+  lessonId: raw?.lessonId ?? raw?.LessonId ?? raw?.maBai ?? raw?.MaBai ?? null,
+  title: raw?.title ?? raw?.Title ?? raw?.tenBai ?? raw?.TenBai ?? 'Bài học',
+  description: raw?.description ?? raw?.Description ?? raw?.moTa ?? raw?.MoTa ?? null,
+  status: this.normalizePlanStatus(raw?.status ?? raw?.Status),
+  startTime: typeof start === 'string' && start ? start : new Date().toISOString(),
+  endTime: typeof end === 'string' && end ? end : new Date().toISOString(),
+  contentType: raw?.contentType ?? raw?.ContentType ?? raw?.loaiNoiDung ?? raw?.LoaiNoiDung ?? null,
+  progressPercent: typeof raw?.progressPercent === 'number'
+    ? raw.progressPercent
+    : (typeof raw?.ProgressPercent === 'number' ? raw.ProgressPercent : undefined),
+  exerciseId: undefined,
+  planId: "",
+  lessonId: "",
+  title: "",
+  status: "Completed",
+  startTime: "",
+  endTime: ""
+};
   }
 
   // User API
@@ -483,8 +533,11 @@ export class ApiService {
     ];
     const raw = await this.requestWithFallback<any>(targets, { method: 'GET', headers: { 'Accept': '*/*' } });
     const items = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : [];
+    const fallbackId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     return items.map((item: any) => ({
-      badgeId: String(item?.badgeId ?? item?.BadgeId ?? crypto.randomUUID?.() ?? `${Date.now()}`),
+      badgeId: String(item?.badgeId ?? item?.BadgeId ?? fallbackId),
       badgeName: item?.badgeName ?? item?.BadgeName ?? 'Huy hiệu',
       description: item?.description ?? item?.Description ?? undefined,
       awardedAt: item?.awardedAt ?? item?.AwardedAt ?? new Date().toISOString(),
@@ -731,6 +784,57 @@ export class ApiService {
     });
   }
 
+  async adminListUsers(search?: string): Promise<{ users: AdminUser[]; total: number }> {
+    const query = search ? `?search=${encodeURIComponent(search)}` : '';
+    const response = await this.request<any>(`/NguoiDung${query}`, {
+      method: 'GET',
+      headers: { Accept: '*/*' },
+    });
+
+    const rawItems = Array.isArray(response?.data)
+      ? response.data
+      : Array.isArray(response)
+        ? response
+        : [];
+
+    const total = typeof response?.total === 'number' ? response.total : rawItems.length;
+    const users = rawItems.map((item: any) => this.normalizeAdminUser(item));
+    return { users, total };
+  }
+
+  async adminGetUser(maNd: string): Promise<AdminUser> {
+    const response = await this.request<any>(`/NguoiDung/${encodeURIComponent(maNd)}`, {
+      method: 'GET',
+      headers: { Accept: '*/*' },
+    });
+    return this.normalizeAdminUser(response);
+  }
+
+  async adminCreateUser(payload: AdminUserCreatePayload): Promise<AdminUser> {
+    const response = await this.request<any>('/NguoiDung', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: '*/*' },
+      body: JSON.stringify(payload),
+    });
+    return this.normalizeAdminUser(response?.data ?? response);
+  }
+
+  async adminUpdateUser(maNd: string, payload: AdminUserUpdatePayload): Promise<AdminUser> {
+    const response = await this.request<any>(`/NguoiDung/${encodeURIComponent(maNd)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Accept: '*/*' },
+      body: JSON.stringify(payload),
+    });
+    return this.normalizeAdminUser(response?.data ?? response);
+  }
+
+  async adminDeleteUser(maNd: string): Promise<void> {
+    await this.request<void>(`/NguoiDung/${encodeURIComponent(maNd)}`, {
+      method: 'DELETE',
+      headers: { Accept: '*/*' },
+    });
+  }
+
   // Utility methods
   logout(): void {
     this.token = null;
@@ -749,7 +853,7 @@ export class ApiService {
       return null;
     }
 
-  const keys = ['ma_nd', 'maNd', 'maNguoiDung', 'maND', 'userId', 'id'];
+    const keys = ['ma_nd', 'maNd', 'maNguoiDung', 'maND', 'userId', 'id'];
     for (const key of keys) {
       if (Object.prototype.hasOwnProperty.call(candidate, key)) {
         const value = (candidate as Record<string, unknown>)[key];
@@ -763,6 +867,41 @@ export class ApiService {
     }
 
     return null;
+  }
+
+  private normalizeAdminUser(payload: any): AdminUser {
+    if (!payload || typeof payload !== 'object') {
+      throw new Error('Invalid admin user payload');
+    }
+
+    const resolveString = (value: unknown): string | null => {
+      if (value === undefined || value === null) return null;
+      return String(value);
+    };
+
+    const maNd = resolveString(
+      payload.maNd ?? payload.MaNd ?? payload.ma_nd ?? payload.MA_ND ?? payload.id
+    );
+
+    if (!maNd) {
+      throw new Error('Missing user id in payload');
+    }
+
+    const email =
+      resolveString(payload.email ?? payload.Email ?? payload.emailAddress) ?? '';
+    const hoTen =
+      resolveString(payload.hoTen ?? payload.HoTen ?? payload.name ?? payload.fullName) ?? '';
+
+    return {
+      maNd,
+      hoTen,
+      email,
+      vaiTro: resolveString(payload.vaiTro ?? payload.VaiTro ?? payload.role),
+      soDienThoai: resolveString(payload.soDienThoai ?? payload.SoDienThoai ?? payload.so_dien_thoai),
+      ngayDangKy: resolveString(payload.ngayDangKy ?? payload.NgayDangKy ?? payload.createdAt),
+      lanDangNhapCuoi: resolveString(payload.lanDangNhapCuoi ?? payload.LanDangNhapCuoi ?? payload.lastLoginAt),
+      anhDaiDien: resolveString(payload.anhDaiDien ?? payload.AnhDaiDien ?? payload.avatarUrl),
+    };
   }
 
   getCurrentUserId(): string {

@@ -5,6 +5,7 @@ using System.Security.Claims;
 using TOEICWEB.Data;
 using TOEICWEB.Models;
 using TOEICWEB.ViewModels;
+using TOEICWEB.ViewModels.Admin;
 using System.Data;
 using System.Security.Cryptography;
 using System.Text;
@@ -20,6 +21,42 @@ public class NguoiDungController : ControllerBase
     public NguoiDungController(SupabaseDbContext context)
     {
         _context = context;
+    }
+
+    private bool CurrentUserIsAdmin()
+    {
+        var role = User.FindFirst("VaiTro")?.Value;
+        return string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<string> GenerateNextUserIdAsync(string? role)
+    {
+        var normalizedRole = string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase)
+            ? "Admin"
+            : "User";
+
+        var prefix = normalizedRole == "Admin" ? "ADM" : "ND";
+        var lastUser = await _context.NguoiDungs
+            .AsNoTracking()
+            .Where(u => u.MaNd.StartsWith(prefix))
+            .OrderByDescending(u => u.MaNd)
+            .FirstOrDefaultAsync();
+
+        if (lastUser == null)
+        {
+            return $"{prefix}001";
+        }
+
+        var numericPart = lastUser.MaNd.Length > prefix.Length
+            ? lastUser.MaNd[prefix.Length..]
+            : "0";
+
+        if (!int.TryParse(numericPart, out var currentNumber))
+        {
+            currentNumber = 0;
+        }
+
+        return $"{prefix}{(currentNumber + 1):D3}";
     }
 
     private static string ComputeMd5(string input)
@@ -43,6 +80,265 @@ public class NguoiDungController : ControllerBase
     {
         Response.Headers.Append("Allow", "OPTIONS, GET, PUT, PATCH, POST");
         return Ok();
+    }
+
+    [Authorize]
+    [HttpGet]
+    public async Task<IActionResult> GetUsers([FromQuery] string? search = null)
+    {
+        if (!CurrentUserIsAdmin())
+        {
+            return Forbid();
+        }
+
+        var query = _context.NguoiDungs.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var keyword = search.Trim().ToLowerInvariant();
+            query = query.Where(u =>
+                (u.HoTen != null && u.HoTen.ToLower().Contains(keyword)) ||
+                (u.Email != null && u.Email.ToLower().Contains(keyword)) ||
+                (u.MaNd != null && u.MaNd.ToLower().Contains(keyword)));
+        }
+
+        var users = await query
+            .OrderByDescending(u => u.NgayDangKy ?? DateTime.MinValue)
+            .ThenBy(u => u.MaNd)
+            .Select(u => new AdminUserVM
+            {
+                MaNd = u.MaNd,
+                Email = u.Email,
+                HoTen = u.HoTen,
+                VaiTro = u.VaiTro,
+                SoDienThoai = u.SoDienThoai,
+                NgayDangKy = u.NgayDangKy,
+                LanDangNhapCuoi = u.LanDangNhapCuoi,
+                AnhDaiDien = u.AnhDaiDien
+            })
+            .ToListAsync();
+
+        return Ok(new { total = users.Count, data = users });
+    }
+
+    [Authorize]
+    [HttpGet("{maNd}")]
+    public async Task<IActionResult> GetUserById([FromRoute] string maNd)
+    {
+        if (!CurrentUserIsAdmin())
+        {
+            return Forbid();
+        }
+
+        if (string.IsNullOrWhiteSpace(maNd))
+        {
+            return BadRequest(new { message = "Ma nguoi dung khong hop le." });
+        }
+
+        var user = await _context.NguoiDungs.AsNoTracking()
+            .Where(u => u.MaNd == maNd)
+            .Select(u => new AdminUserVM
+            {
+                MaNd = u.MaNd,
+                Email = u.Email,
+                HoTen = u.HoTen,
+                VaiTro = u.VaiTro,
+                SoDienThoai = u.SoDienThoai,
+                NgayDangKy = u.NgayDangKy,
+                LanDangNhapCuoi = u.LanDangNhapCuoi,
+                AnhDaiDien = u.AnhDaiDien
+            })
+            .FirstOrDefaultAsync();
+
+        if (user == null)
+        {
+            return NotFound(new { message = "Khong tim thay nguoi dung." });
+        }
+
+        return Ok(user);
+    }
+
+    [Authorize]
+    [HttpPost]
+    public async Task<IActionResult> CreateUser([FromBody] AdminUserCreateVM model)
+    {
+        if (!CurrentUserIsAdmin())
+        {
+            return Forbid();
+        }
+
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        var hoTen = model.HoTen?.Trim();
+        var email = model.Email?.Trim();
+        var matKhau = model.MatKhau?.Trim();
+        var soDienThoai = model.SoDienThoai?.Trim();
+        var vaiTro = string.IsNullOrWhiteSpace(model.VaiTro) ? "User" : model.VaiTro!.Trim();
+
+        if (string.IsNullOrWhiteSpace(hoTen) || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(matKhau))
+        {
+            return BadRequest(new { message = "Ho ten, email va mat khau la bat buoc." });
+        }
+
+        if (matKhau.Length < 6)
+        {
+            return BadRequest(new { message = "Mat khau phai it nhat 6 ky tu." });
+        }
+
+        if (await _context.NguoiDungs.AnyAsync(u => u.Email == email))
+        {
+            return Conflict(new { message = "Email da ton tai trong he thong." });
+        }
+
+        var maNd = await GenerateNextUserIdAsync(vaiTro);
+
+        var user = new NguoiDung
+        {
+            MaNd = maNd,
+            HoTen = hoTen,
+            Email = email,
+            MatKhau = matKhau,
+            VaiTro = vaiTro,
+            SoDienThoai = string.IsNullOrWhiteSpace(soDienThoai) ? null : soDienThoai,
+            NgayDangKy = DateTime.UtcNow,
+            LanDangNhapCuoi = null,
+            AnhDaiDien = null
+        };
+
+        _context.NguoiDungs.Add(user);
+        await _context.SaveChangesAsync();
+
+        var result = new AdminUserVM
+        {
+            MaNd = user.MaNd,
+            Email = user.Email,
+            HoTen = user.HoTen,
+            VaiTro = user.VaiTro,
+            SoDienThoai = user.SoDienThoai,
+            NgayDangKy = user.NgayDangKy,
+            LanDangNhapCuoi = user.LanDangNhapCuoi,
+            AnhDaiDien = user.AnhDaiDien
+        };
+
+        return CreatedAtAction(nameof(GetUserById), new { maNd = user.MaNd }, result);
+    }
+
+    [Authorize]
+    [HttpPut("{maNd}")]
+    public async Task<IActionResult> UpdateUser([FromRoute] string maNd, [FromBody] AdminUserUpdateVM model)
+    {
+        if (!CurrentUserIsAdmin())
+        {
+            return Forbid();
+        }
+
+        if (string.IsNullOrWhiteSpace(maNd))
+        {
+            return BadRequest(new { message = "Ma nguoi dung khong hop le." });
+        }
+
+        var user = await _context.NguoiDungs.FirstOrDefaultAsync(u => u.MaNd == maNd);
+        if (user == null)
+        {
+            return NotFound(new { message = "Khong tim thay nguoi dung." });
+        }
+
+        var updatedEmail = model.Email?.Trim();
+        if (!string.IsNullOrWhiteSpace(updatedEmail) && !string.Equals(updatedEmail, user.Email, StringComparison.OrdinalIgnoreCase))
+        {
+            var exists = await _context.NguoiDungs.AnyAsync(u => u.Email == updatedEmail && u.MaNd != maNd);
+            if (exists)
+            {
+                return Conflict(new { message = "Email da ton tai trong he thong." });
+            }
+            user.Email = updatedEmail;
+        }
+
+        var updatedName = model.HoTen?.Trim();
+        if (!string.IsNullOrWhiteSpace(updatedName))
+        {
+            user.HoTen = updatedName;
+        }
+
+        var updatedRole = model.VaiTro?.Trim();
+        if (!string.IsNullOrWhiteSpace(updatedRole))
+        {
+            user.VaiTro = updatedRole;
+        }
+
+        var updatedPhone = model.SoDienThoai?.Trim();
+        if (model.SoDienThoai != null)
+        {
+            user.SoDienThoai = string.IsNullOrWhiteSpace(updatedPhone) ? null : updatedPhone;
+        }
+
+        if (!string.IsNullOrWhiteSpace(model.MatKhau))
+        {
+            if (model.MatKhau.Length < 6)
+            {
+                return BadRequest(new { message = "Mat khau phai it nhat 6 ky tu." });
+            }
+            user.MatKhau = model.MatKhau.Trim();
+        }
+
+        await _context.SaveChangesAsync();
+
+        var result = new AdminUserVM
+        {
+            MaNd = user.MaNd,
+            Email = user.Email,
+            HoTen = user.HoTen,
+            VaiTro = user.VaiTro,
+            SoDienThoai = user.SoDienThoai,
+            NgayDangKy = user.NgayDangKy,
+            LanDangNhapCuoi = user.LanDangNhapCuoi,
+            AnhDaiDien = user.AnhDaiDien
+        };
+
+        return Ok(result);
+    }
+
+    [Authorize]
+    [HttpDelete("{maNd}")]
+    public async Task<IActionResult> DeleteUser([FromRoute] string maNd)
+    {
+        if (!CurrentUserIsAdmin())
+        {
+            return Forbid();
+        }
+
+        if (string.IsNullOrWhiteSpace(maNd))
+        {
+            return BadRequest(new { message = "Ma nguoi dung khong hop le." });
+        }
+
+        var user = await _context.NguoiDungs.FirstOrDefaultAsync(u => u.MaNd == maNd);
+        if (user == null)
+        {
+            return NotFound(new { message = "Khong tim thay nguoi dung." });
+        }
+
+        var currentUserId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!string.IsNullOrWhiteSpace(currentUserId) &&
+            string.Equals(currentUserId, maNd, StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { message = "Khong the xoa tai khoan cua chinh ban." });
+        }
+
+        _context.NguoiDungs.Remove(user);
+        try
+        {
+            await _context.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex)
+        {
+            return Conflict(new { message = "Khong the xoa nguoi dung do dang duoc tham chieu.", error = ex.Message });
+        }
+
+        return NoContent();
     }
 
     private static string? FirstNonEmpty(params string?[] values)
@@ -303,8 +599,10 @@ public class NguoiDungController : ControllerBase
                 return BadRequest(new { message = "Mat khau moi phai khac mat khau hien tai." });
             }
 
-            user.MatKhau = ComputeMd5(newPassword);
+            // DB trigger trg_ma_hoa_mat_khau hashes passwords; use raw value to avoid double hashing.
+            user.MatKhau = newPassword;
             await _context.SaveChangesAsync();
+            await _context.Entry(user).ReloadAsync();
 
             return Ok(new { message = "Doi mat khau thanh cong!" });
         }

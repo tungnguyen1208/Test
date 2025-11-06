@@ -31,7 +31,7 @@ namespace ToeicWeb.Controllers
         private string GenerateJwtToken(NguoiDung user)
         {
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(
-                _configuration["Jwt:Key"] ?? "your-secret-key-here-minimum-32-characters-long"));
+                _configuration["Jwt:Key"] ?? "your-secret-key-here-minimum-32-characters-long-for-security"));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
             var claims = new[]
@@ -374,8 +374,10 @@ namespace ToeicWeb.Controllers
                     return BadRequest(new { message = "Mat khau moi phai khac mat khau hien tai." });
                 }
 
-                user.MatKhau = GetMD5Hash(newPassword);
+                // DB trigger trg_ma_hoa_mat_khau hashes passwords, so store raw value here to avoid double hashing.
+                user.MatKhau = newPassword;
                 await _context.SaveChangesAsync();
+                await _context.Entry(user).ReloadAsync();
 
                 return Ok(new { message = "Doi mat khau thanh cong!" });
             }

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+﻿import { useEffect, useMemo, useState } from "react";
+import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { BookOpen } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
@@ -16,24 +16,31 @@ interface AuthPageProps {
   initialTab: AuthTab;
 }
 
+const resolveRole = (user: any): string | null => {
+  if (!user || typeof user !== "object") return null;
+  const candidate = [user?.vai_tro, user?.VaiTro, user?.role, user?.Role].find(
+    (item) => typeof item === "string" && item.trim().length > 0
+  );
+  return candidate ? (candidate as string).trim().toLowerCase() : null;
+};
+
 const AuthPage = ({ initialTab }: AuthPageProps) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login } = useAuth();
+  const { login, isAuthenticated, user } = useAuth();
 
   const [activeTab, setActiveTab] = useState<AuthTab>(initialTab);
-
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
-  const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [loginLoading, setLoginLoading] = useState(false);
 
   const [registerName, setRegisterName] = useState("");
   const [registerEmail, setRegisterEmail] = useState("");
   const [registerPassword, setRegisterPassword] = useState("");
-  const [registerLoading, setRegisterLoading] = useState(false);
   const [registerError, setRegisterError] = useState<string | null>(null);
   const [registerSuccess, setRegisterSuccess] = useState<string | null>(null);
+  const [registerLoading, setRegisterLoading] = useState(false);
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -43,26 +50,36 @@ const AuthPage = ({ initialTab }: AuthPageProps) => {
   }, [initialTab]);
 
   const handleTabChange = (value: string) => {
-    const nextValue = value === "register" ? "register" : "login";
-    setActiveTab(nextValue);
+    const nextTab: AuthTab = value === "register" ? "register" : "login";
+    setActiveTab(nextTab);
     setLoginError(null);
     setRegisterError(null);
     setRegisterSuccess(null);
-    navigate(nextValue === "login" ? "/login" : "/register", { replace: true, state: location.state });
+    navigate(nextTab === "login" ? "/login" : "/register", { replace: true, state: location.state });
   };
 
   const canSubmitLogin = useMemo(
-    () => Boolean(loginEmail.trim()) && Boolean(loginPassword.trim()),
+    () => loginEmail.trim().length > 0 && loginPassword.trim().length > 0,
     [loginEmail, loginPassword]
   );
 
   const canSubmitRegister = useMemo(
     () =>
-      Boolean(registerName.trim()) &&
-      Boolean(registerEmail.trim()) &&
-      Boolean(registerPassword.trim()),
+      registerName.trim().length > 0 &&
+      registerEmail.trim().length > 0 &&
+      registerPassword.trim().length > 0,
     [registerName, registerEmail, registerPassword]
   );
+
+  const resolveRedirect = (role: string | null) => {
+    if (role === "admin") return "/admin";
+    const state = location.state as { from?: { pathname?: string } } | null;
+    const fromPath = state?.from?.pathname;
+    if (fromPath && fromPath !== "/login" && fromPath !== "/register") {
+      return fromPath;
+    }
+    return "/dashboard";
+  };
 
   const handleLoginSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -71,15 +88,22 @@ const AuthPage = ({ initialTab }: AuthPageProps) => {
     setLoginError(null);
     setLoginLoading(true);
     try {
-      await login(loginEmail.trim(), loginPassword.trim());
-      const redirectTo = (location.state as any)?.from?.pathname || "/";
-      navigate(redirectTo, { replace: true });
+      const response = await login(loginEmail.trim(), loginPassword.trim());
+      const role = resolveRole(response?.user);
+      navigate(resolveRedirect(role), { replace: true });
     } catch (error: any) {
-      setLoginError(error?.message || "Đăng nhập thất bại. Vui lòng kiểm tra lại thông tin.");
+  setLoginError(error?.message || "Đăng nhập thất bại. Vui lòng thử lại.");
     } finally {
       setLoginLoading(false);
     }
   };
+
+  const authenticatedRole = resolveRole(user);
+  const authenticatedRedirect = resolveRedirect(authenticatedRole);
+
+  if (isAuthenticated && location.pathname !== authenticatedRedirect) {
+    return <Navigate to={authenticatedRedirect} replace />;
+  }
 
   const handleRegisterSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -94,13 +118,13 @@ const AuthPage = ({ initialTab }: AuthPageProps) => {
         email: registerEmail.trim(),
         matKhau: registerPassword.trim(),
       });
-      setRegisterSuccess("Đăng ký thành công! Bạn có thể đăng nhập ngay bây giờ.");
+  setRegisterSuccess("Đăng ký thành công. Bạn có thể đăng nhập ngay bây giờ.");
       setActiveTab("login");
       navigate("/login", { replace: true, state: location.state });
       setLoginEmail(registerEmail.trim());
       setRegisterPassword("");
     } catch (error: any) {
-      setRegisterError(error?.message || "Đăng ký thất bại. Vui lòng thử lại.");
+  setRegisterError(error?.message || "Đăng ký thất bại. Vui lòng thử lại.");
     } finally {
       setRegisterLoading(false);
     }
@@ -179,16 +203,12 @@ const AuthPage = ({ initialTab }: AuthPageProps) => {
                       <Input
                         id="login-password"
                         type="password"
-                        placeholder="••••••••"
+                        placeholder="********"
                         value={loginPassword}
                         onChange={(event) => setLoginPassword(event.target.value)}
                       />
                     </div>
-                    <Button
-                      type="submit"
-                      className="w-full"
-                      disabled={loginLoading || !canSubmitLogin}
-                    >
+                    <Button type="submit" className="w-full" disabled={loginLoading || !canSubmitLogin}>
                       {loginLoading ? "Đang đăng nhập..." : "Đăng nhập"}
                     </Button>
                   </form>
@@ -220,7 +240,7 @@ const AuthPage = ({ initialTab }: AuthPageProps) => {
                       </label>
                       <Input
                         id="register-name"
-                        placeholder="Nguyễn Văn A"
+                        placeholder="Nguyen Van A"
                         value={registerName}
                         onChange={(event) => setRegisterName(event.target.value)}
                       />
@@ -239,21 +259,17 @@ const AuthPage = ({ initialTab }: AuthPageProps) => {
                     </div>
                     <div className="space-y-2">
                       <label className="text-sm font-medium" htmlFor="register-password">
-                        Mật khẩu
+                        Mat khau
                       </label>
                       <Input
                         id="register-password"
                         type="password"
-                        placeholder="••••••••"
+                        placeholder="********"
                         value={registerPassword}
                         onChange={(event) => setRegisterPassword(event.target.value)}
                       />
                     </div>
-                    <Button
-                      type="submit"
-                      className="w-full"
-                      disabled={registerLoading || !canSubmitRegister}
-                    >
+                    <Button type="submit" className="w-full" disabled={registerLoading || !canSubmitRegister}>
                       {registerLoading ? "Đang đăng ký..." : "Đăng ký ngay"}
                     </Button>
                   </form>

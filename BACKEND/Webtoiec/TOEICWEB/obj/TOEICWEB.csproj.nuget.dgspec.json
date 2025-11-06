@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "h:\\Hocki7\\New folder\\Toeic\\BACKEND\\Webtoiec\\TOEICWEB\\TOEICWEB.csproj": {}
+    "H:\\Hocki7\\New folder\\Toeic\\BACKEND\\Webtoiec\\TOEICWEB\\TOEICWEB.csproj": {}
   },
   "projects": {
-    "h:\\Hocki7\\New folder\\Toeic\\BACKEND\\Webtoiec\\TOEICWEB\\TOEICWEB.csproj": {
+    "H:\\Hocki7\\New folder\\Toeic\\BACKEND\\Webtoiec\\TOEICWEB\\TOEICWEB.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "h:\\Hocki7\\New folder\\Toeic\\BACKEND\\Webtoiec\\TOEICWEB\\TOEICWEB.csproj",
+        "projectUniqueName": "H:\\Hocki7\\New folder\\Toeic\\BACKEND\\Webtoiec\\TOEICWEB\\TOEICWEB.csproj",
         "projectName": "TOEICWEB",
-        "projectPath": "h:\\Hocki7\\New folder\\Toeic\\BACKEND\\Webtoiec\\TOEICWEB\\TOEICWEB.csproj",
+        "projectPath": "H:\\Hocki7\\New folder\\Toeic\\BACKEND\\Webtoiec\\TOEICWEB\\TOEICWEB.csproj",
         "packagesPath": "C:\\Users\\Tung2k4\\.nuget\\packages\\",
-        "outputPath": "h:\\Hocki7\\New folder\\Toeic\\BACKEND\\Webtoiec\\TOEICWEB\\obj\\",
+        "outputPath": "H:\\Hocki7\\New folder\\Toeic\\BACKEND\\Webtoiec\\TOEICWEB\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

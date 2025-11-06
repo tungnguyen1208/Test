@@ -45,8 +45,22 @@ const App = () => (
           <Route path="/" element={<Index />} />
           <Route path="/study-plan" element={<StudyPlan />} />
           <Route path="/assessment" element={<Assessment />} />
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/admin" element={<AdminDashboard />} />
+          <Route
+            path="/dashboard"
+            element={(
+              <RequireAuth>
+                <DashboardPage />
+              </RequireAuth>
+            )}
+          />
+          <Route
+            path="/admin"
+            element={(
+              <RequireAuth roles={["Admin"]} forbiddenRedirect="/dashboard">
+                <AdminDashboard />
+              </RequireAuth>
+            )}
+          />
           <Route path="/lesson/reading" element={<ReadingLessonPage />} />
           <Route path="/lesson/listening" element={<ListeningLessonPage />} />
           <Route path="/lesson/writing" element={<WritingLessonPage />} />
