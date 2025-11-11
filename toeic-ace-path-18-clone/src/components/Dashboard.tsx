@@ -1,3 +1,9 @@
+/**
+ * LEGACY: This component duplicates the dashboard available at pages/DashboardPage.tsx.
+ * - Simplified (no Header/Footer, fewer stats)
+ * - Tabs overlap: overview/plan/profile vs overview/plan/progress in the page
+ * Prefer using pages/DashboardPage.tsx for routes and remove this component after migration.
+ */
 import UserProgressDashboard from "./UserProgressDashboard";
 import LearningPlanView from "./LearningPlanView";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";

@@ -52,6 +52,13 @@ const RequireAuth = ({
   if (roles && roles.length > 0) {
     const allowed = roles.some((role) => role.toLowerCase() === normalizedRole);
     if (!allowed) {
+      // If a non-admin user tries to access /dashboard when dashboard is intended for authenticated general users
+      // we still allow it (assuming dashboard is common). Only block strictly admin-only areas.
+      const attemptingDashboard = location.pathname.toLowerCase().startsWith('/dashboard');
+      if (attemptingDashboard && !roles.includes('Admin')) {
+        // Allow fallback to dashboard for regular users without role check interference
+        return <>{children}</>;
+      }
       return <Navigate to={forbiddenRedirect} replace />;
     }
   }

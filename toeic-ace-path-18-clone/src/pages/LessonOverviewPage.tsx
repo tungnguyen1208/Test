@@ -61,7 +61,7 @@ const LessonOverviewPage = () => {
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge variant="outline">{new Date(bd.ngayTao).toLocaleDateString()}</Badge>
-                  <Button size="sm" onClick={() => navigate(`/reading-doc/${bd.maBaiDoc}`)}>
+                  <Button size="sm" onClick={() => navigate(`/lesson/reading/${maBai}`)}>
                     <ArrowRight className="w-4 h-4 mr-2"/>Học ngay
                   </Button>
                 </div>

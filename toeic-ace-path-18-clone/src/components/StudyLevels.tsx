@@ -240,8 +240,8 @@ const StudyLevels = () => {
               </div>
             </CardHeader>
             <CardContent>
-              <div className="grid md:grid-cols-2 gap-6">
-                {/* Skills */}
+              <div className="grid gap-6">
+                {/* Kỹ năng trọng tâm */}
                 <div>
                   <h4 className="font-semibold text-toeic-navy mb-3 flex items-center">
                     <Target className="w-4 h-4 mr-2" />
@@ -265,34 +265,6 @@ const StudyLevels = () => {
                     )}
                   </div>
                 </div>
-
-                {/* Lessons */}
-                <div>
-                  <h4 className="font-semibold text-toeic-navy mb-3 flex items-center">
-                    <BookOpen className="w-4 h-4 mr-2" />
-                    Chủ đề bài học
-                  </h4>
-                  <div className="space-y-1">
-                    {level.lessons.length > 0 ? (
-                      level.lessons.map((lesson, lessonIndex) => (
-                        <div key={lessonIndex} className="flex items-center space-x-2 p-2 bg-white/30 rounded text-sm">
-                          {lessonIndex < level.completed ? (
-                            <CheckCircle className="w-4 h-4 text-green-500" />
-                          ) : lessonIndex === level.completed ? (
-                            <div className="w-4 h-4 rounded-full bg-blue-500 flex items-center justify-center">
-                              <div className="w-2 h-2 bg-white rounded-full" />
-                            </div>
-                          ) : (
-                            <div className="w-4 h-4 rounded-full border-2 border-gray-300" />
-                          )}
-                          <span className={lessonIndex < level.completed ? 'text-muted-foreground line-through' : ''}>{lesson}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="text-sm text-muted-foreground">Chưa cập nhật</div>
-                    )}
-                  </div>
-                </div>
               </div>
 
               {/* Action Buttons */}
@@ -300,28 +272,28 @@ const StudyLevels = () => {
                 {level.progress > 0 && level.progress < 100 && (
                   <Button 
                     variant="hero"
-                    onClick={() => navigate('/lesson/reading')}
+                    onClick={() => navigate(`/roadmap/${level.id}/all`)}
                   >
                     <ArrowRight className="w-4 h-4 mr-2" />
                     Tiếp tục học
                   </Button>
                 )}
-                <Button size="sm" onClick={() => navigate('/lesson/reading')}>
+                <Button size="sm" onClick={() => navigate(`/roadmap/${level.id}/reading`)}>
                   Bài đọc hiểu
                 </Button>
-                <Button size="sm" onClick={() => navigate('/lesson/listening')}>
+                <Button size="sm" onClick={() => navigate(`/roadmap/${level.id}/listening`)}>
                   Bài luyện nghe
                 </Button>
-                <Button size="sm" onClick={() => navigate('/lesson/writing')}>
+                <Button size="sm" onClick={() => navigate(`/roadmap/${level.id}/writing`)}>
                   Bài tập viết
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => navigate('/lesson/conversation')}>
+                <Button size="sm" variant="outline" onClick={() => navigate(`/roadmap/${level.id}/speaking`)}>
                   Luyện giao tiếp
                 </Button>
-                {level.progress === 0 && index === levels.findIndex(l => l.progress > 0 && l.progress < 100) + 1 && (
-                  <Button 
+                {level.progress === 0 && (
+                  <Button
                     variant="outline"
-                    onClick={() => navigate('/lesson/reading')}
+                    onClick={() => navigate(`/roadmap/${level.id}/all`)}
                   >
                     <Star className="w-4 h-4 mr-2" />
                     Bắt đầu cấp độ này
@@ -333,20 +305,7 @@ const StudyLevels = () => {
                     Xem chứng chỉ
                   </Button>
                 )}
-                <Button 
-                  variant="ghost" 
-                  size="sm"
-                  onClick={() => {
-                    // Switch to roadmap tab
-                    const tabsTrigger = document.querySelector('[value="roadmap"]') as HTMLElement;
-                    if (tabsTrigger) {
-                      tabsTrigger.click();
-                    }
-                  }}
-                >
-                  <Clock className="w-4 h-4 mr-2" />
-                  Chi tiết lộ trình 25 ngày
-                </Button>
+                {/* Removed 'Chi tiết lộ trình 25 ngày' button per request */}
               </div>
             </CardContent>
           </Card>

@@ -85,10 +85,17 @@ export function UserManagement() {
 
   const handleFetchError = useCallback((error: unknown) => {
     console.error("Failed to fetch users", error);
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Khong the tai danh sach nguoi dung. Vui long thu lai.";
+    let message: string;
+    if (error && typeof error === 'object' && 'status' in (error as any)) {
+      const status = (error as any).status;
+      if (status === 401 || status === 403) {
+        message = 'Bạn không có quyền xem danh sách người dùng (401/403).';
+      } else {
+        message = (error as any).message || 'Không thể tải danh sách người dùng.';
+      }
+    } else {
+      message = error instanceof Error ? error.message : 'Không thể tải danh sách người dùng. Vui lòng thử lại.';
+    }
     toast({
       variant: "destructive",
       title: "Loi tai danh sach",
@@ -231,7 +238,7 @@ export function UserManagement() {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  placeholder="Tim kiem theo ten, email, ma nguoi dung..."
+                  placeholder="Tim kiem theo ten, email, so dien thoai..."
                   value={searchTerm}
                   onChange={(event) => setSearchTerm(event.target.value)}
                   className="w-72 pl-10"
@@ -272,7 +279,7 @@ export function UserManagement() {
                 ) : displayedUsers.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={7} className="py-6 text-center text-muted-foreground">
-                      Khong co nguoi dung nao phu hop voi tu khoa.
+                      {searchTerm.trim().length > 0 ? 'Không có người dùng nào phù hợp với từ khóa.' : 'Chưa có dữ liệu người dùng hoặc bạn không có quyền.'}
                     </TableCell>
                   </TableRow>
                 ) : (

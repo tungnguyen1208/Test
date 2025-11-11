@@ -1,4 +1,7 @@
 const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || 'https://tile-comfort-housing-bathrooms.trycloudflare.com/api';
+if (typeof window !== 'undefined') {
+  console.info('[API] base url', API_BASE_URL);
+}
 const LOGIN_PATH_ENV = (import.meta as any).env?.VITE_LOGIN_PATH as string | undefined;
 const REGISTER_PATH_ENV = (import.meta as any).env?.VITE_REGISTER_PATH as string | undefined;
 
@@ -97,6 +100,31 @@ export interface DashboardStats {
   studyHours: number;
   progress: DashboardProgress;
   recentResults: RecentResult[];
+}
+
+// Tien do hoc tap (progress) types
+export interface TienDoHocTapItem {
+  maTienDo: number | string;
+  maBai: string;
+  tenBai: string;
+  maLoTrinh: string;
+  trangThai: string;
+  ngayHoanThanh?: string | null;
+  ngayCapNhat?: string | null;
+  thoiGianHocPhut: number;
+  phanTramHoanThanh: number;
+}
+
+export interface TienDoHocTapListResponse {
+  message?: string;
+  total: number;
+  data: TienDoHocTapItem[];
+}
+
+export interface UpdateTienDoPayload {
+  trangThai?: string;
+  thoiGianHocPhut?: number;
+  phanTramHoanThanh?: number;
 }
 
 export interface AdminUser {
@@ -274,7 +302,8 @@ export class ApiService {
   private token: string | null = null;
 
   constructor() {
-    this.token = localStorage.getItem('authToken');
+    const raw = localStorage.getItem('authToken');
+    this.token = raw ? raw.replace(/^"+|"+$/g, '').trim() : null; // sanitize accidental quotes/whitespace
   }
 
   private broadcastUnauthorized(): void {
@@ -306,7 +335,7 @@ export class ApiService {
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
     // Always re-hydrate token from localStorage in case instance state was lost
-    const persisted = localStorage.getItem('authToken');
+    const persisted = (localStorage.getItem('authToken') || '').replace(/^"+|"+$/g, '').trim();
     if (!this.token && persisted) {
       this.token = persisted;
     }
@@ -325,12 +354,30 @@ export class ApiService {
 
     try {
       const response = await fetch(url, config);
+      // Debug outgoing Authorization header once per request (dev only)
+      if (usedAuthHeader) {
+        console.debug('[API] fetch', { url, hasAuth: usedAuthHeader, tokenPreview: (this.token || '').slice(0, 16) });
+      }
       const contentType = response.headers.get('content-type') ?? '';
 
       if (!response.ok) {
         if ((response.status === 401 || response.status === 403) && usedAuthHeader) {
-          this.logout();
-          this.broadcastUnauthorized();
+          // Suppress global unauthorized broadcast for non-critical endpoints (e.g., Dashboard),
+          // to avoid logging the user out when a feature endpoint denies access.
+          const profileProbe = /\/NguoiDung\/profile|\/NguoiDung\/thong-tin|\/Auth\/profile|\/users\/me|\/users\/profile|\/Users\/profile|\/Account\/profile/i.test(endpoint);
+          const dashboardProbe = /\/(Dashboard|dashboard)(\/?|$)/i.test(endpoint);
+          const criticalAuth = /\/(Auth|Account)\/(refresh|validate|verify|me)(\/?|$)/i.test(endpoint);
+          const tokPreview = (this.token || '').toString().slice(0, 12);
+          console.warn('[API] 401/403 with Authorization header', { endpoint, status: response.status, tokenPreview: tokPreview });
+          if (criticalAuth && !profileProbe) {
+            console.warn('[API] critical auth failure', { endpoint, status: response.status });
+            this.broadcastUnauthorized();
+          } else if (profileProbe || dashboardProbe) {
+            console.debug('[API] unauthorized on non-critical endpoint – preserving session', { endpoint, status: response.status });
+          } else {
+            // Default safe behavior: keep session to prevent redirect loops; surface error to caller.
+            console.warn('[API] unauthorized (suppressed logout)', { endpoint, status: response.status });
+          }
         }
         let errorPayload: unknown = null;
         try {
@@ -382,7 +429,11 @@ export class ApiService {
         }
         return await this.request<T>(ep, options);
       } catch (e: any) {
-        if (e?.status && e.status !== 404 && e.status !== 405) {
+        // Allow fallback on 401/403 specifically for Dashboard endpoints to try alternative casing/path
+        const isAuthFailure = e?.status === 401 || e?.status === 403;
+        const isDashboard = /\/(Dashboard|dashboard)\//i.test(ep) || /\/(Dashboard|dashboard)(\/|$)/i.test(ep);
+        const isStrictStop = e?.status && ![404, 405].includes(e.status) && !(isAuthFailure && isDashboard);
+        if (isStrictStop) {
           throw e;
         }
         lastErr = e;
@@ -412,26 +463,31 @@ export class ApiService {
     const planId = raw?.planId ?? raw?.PlanId ?? raw?.maLich ?? raw?.MaLich ?? `${Date.now()}`;
     const start = raw?.startTime ?? raw?.StartTime ?? raw?.ngayHoc ?? raw?.NgayHoc;
     const end = raw?.endTime ?? raw?.EndTime;
+    const toNumber = (v: unknown): number | undefined => {
+      if (typeof v === 'number' && !Number.isNaN(v)) return v;
+      if (typeof v === 'string' && v.trim() !== '' && !Number.isNaN(Number(v))) return Number(v);
+      return undefined;
+    };
+
+    const exerciseId = toNumber(
+      raw?.exerciseId ?? raw?.ExerciseId ?? raw?.maBai ?? raw?.MaBai
+    );
+
     return {
-  planId: String(planId),
-  lessonId: raw?.lessonId ?? raw?.LessonId ?? raw?.maBai ?? raw?.MaBai ?? null,
-  title: raw?.title ?? raw?.Title ?? raw?.tenBai ?? raw?.TenBai ?? 'Bài học',
-  description: raw?.description ?? raw?.Description ?? raw?.moTa ?? raw?.MoTa ?? null,
-  status: this.normalizePlanStatus(raw?.status ?? raw?.Status),
-  startTime: typeof start === 'string' && start ? start : new Date().toISOString(),
-  endTime: typeof end === 'string' && end ? end : new Date().toISOString(),
-  contentType: raw?.contentType ?? raw?.ContentType ?? raw?.loaiNoiDung ?? raw?.LoaiNoiDung ?? null,
-  progressPercent: typeof raw?.progressPercent === 'number'
-    ? raw.progressPercent
-    : (typeof raw?.ProgressPercent === 'number' ? raw.ProgressPercent : undefined),
-  exerciseId: undefined,
-  planId: "",
-  lessonId: "",
-  title: "",
-  status: "Completed",
-  startTime: "",
-  endTime: ""
-};
+      exerciseId: exerciseId as any,
+      planId: String(planId),
+      lessonId: (raw?.lessonId ?? raw?.LessonId ?? raw?.maBai ?? raw?.MaBai ?? null) as string | null,
+      title: (raw?.title ?? raw?.Title ?? raw?.tenBai ?? raw?.TenBai ?? 'Bài học') as string,
+      description: (raw?.description ?? raw?.Description ?? raw?.moTa ?? raw?.MoTa ?? null) as string | null,
+      status: this.normalizePlanStatus(raw?.status ?? raw?.Status),
+      startTime: typeof start === 'string' && start ? start : new Date().toISOString(),
+      endTime: typeof end === 'string' && end ? end : new Date().toISOString(),
+      contentType: (raw?.contentType ?? raw?.ContentType ?? raw?.loaiNoiDung ?? raw?.LoaiNoiDung ?? null) as string | null,
+      progressPercent:
+        typeof raw?.progressPercent === 'number'
+          ? raw.progressPercent
+          : (typeof raw?.ProgressPercent === 'number' ? raw.ProgressPercent : undefined),
+    };
   }
 
   // User API
@@ -443,19 +499,34 @@ export class ApiService {
   }
 
   async login(credentials: { email: string; password: string }): Promise<{ token: string; userId: number }> {
-    const response = await this.request<{ token: string; userId: number }>('/users/login', {
-      method: 'POST',
-      body: JSON.stringify({
-        email: credentials.email,
-        passwordHash: credentials.password
-      }),
-    });
-    
-    this.token = response.token;
-    localStorage.setItem('authToken', response.token);
-    localStorage.setItem('userId', response.userId.toString());
-    
-    return response;
+    // Chuyển sang dùng authLogin (chuẩn backend /Auth/dang-nhap hoặc /Auth/login) để bảo đảm token hợp lệ
+    const result = await this.authLogin(credentials.email, credentials.password);
+    const token = result.token;
+    const userObj: any = result.user;
+    const userId = typeof userObj === 'object' ? this.extractUserIdentifier(userObj) : null;
+    if (!userId) {
+      // fallback: cố gắng lấy từ JWT payload
+      try {
+        const parts = token.split('.');
+        if (parts.length === 3) {
+          const payloadRaw = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+          const padded = payloadRaw + '='.repeat((4 - (payloadRaw.length % 4)) % 4);
+          const binary = atob(padded);
+          const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+          const json = JSON.parse(new TextDecoder('utf-8').decode(bytes));
+          const claimId = json['nameid'] || json['sub'] || json['MaNd'] || json['maNd'];
+          if (claimId) {
+            localStorage.setItem('userId', String(claimId));
+          }
+        }
+      } catch {}
+    } else {
+      localStorage.setItem('userId', userId);
+    }
+    this.token = token;
+    localStorage.setItem('authToken', token);
+    if (userObj) localStorage.setItem('currentUser', JSON.stringify(userObj));
+    return { token, userId: Number(userId) || 0 };
   }
 
   async getUser(userId: number): Promise<User> {
@@ -485,7 +556,7 @@ export class ApiService {
   }
 
   async getPendingExercises(userId: number): Promise<Exercise[]> {
-    return this.request<Exercise[]>(`/users/users/${userId}/exercises/pending`);
+    return this.request<Exercise[]>(`/users/${userId}/exercises/pending`);
   }
 
   // Submission API
@@ -611,6 +682,39 @@ export class ApiService {
     };
   }
 
+  // TienDoHocTap (Progress) APIs
+  async getAllTienDo(): Promise<TienDoHocTapListResponse> {
+    return this.requestWithFallback<TienDoHocTapListResponse>([
+      '/TienDoHocTap',
+      '/tiendohocTap',
+    ], { method: 'GET', headers: { 'Accept': '*/*' } });
+  }
+
+  async getTienDoByBai(maBai: string): Promise<TienDoHocTapItem> {
+    const res = await this.requestWithFallback<any>([
+      `/TienDoHocTap/bai/${encodeURIComponent(maBai)}`,
+    ], { method: 'GET', headers: { 'Accept': '*/*' } });
+    return (res?.data ?? res) as TienDoHocTapItem;
+  }
+
+  async getTienDoByLoTrinh(maLoTrinh: string): Promise<TienDoHocTapListResponse> {
+    const res = await this.requestWithFallback<any>([
+      `/TienDoHocTap/lotrinh/${encodeURIComponent(maLoTrinh)}`,
+    ], { method: 'GET', headers: { 'Accept': '*/*' } });
+    return (res?.data ? { total: (res?.total ?? (res?.data?.length ?? 0)), data: res.data } : res) as TienDoHocTapListResponse;
+  }
+
+  async updateTienDo(maBai: string, payload: UpdateTienDoPayload): Promise<TienDoHocTapItem> {
+    const res = await this.requestWithFallback<any>([
+      `/TienDoHocTap/update/${encodeURIComponent(maBai)}`,
+    ], {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': '*/*' },
+      body: JSON.stringify(payload),
+    });
+    return (res?.data ?? res) as TienDoHocTapItem;
+  }
+
   // LoTrinh (Roadmaps)
   async getAvailableRoadmaps(): Promise<LoTrinhResponse> {
     // Some backends might expose different paths, try a few
@@ -624,41 +728,45 @@ export class ApiService {
 
   // Lessons APIs
   async getLessons(): Promise<LessonsResponse> {
+    // Backend canonical: GET /api/BaiHoc -> { message, total, data }
     return this.requestWithFallback<LessonsResponse>([
-      '/BaiHoc/danh-sach',
       '/BaiHoc',
-      '/baihoc/danh-sach',
-      '/baihoc'
+      '/BaiHoc/danh-sach',
+      '/baihoc',
+      '/baihoc/danh-sach'
     ], { method: 'GET', headers: { 'Accept': '*/*' } });
   }
 
   async getLessonDetail(maBai: string): Promise<LessonDetailResponse> {
+    // Backend canonical: GET /api/BaiHoc/{maBai}
     return this.requestWithFallback<LessonDetailResponse>([
-      `/BaiHoc/chi-tiet/${maBai}`,
       `/BaiHoc/${maBai}`,
-      `/baihoc/chi-tiet/${maBai}`,
-      `/baihoc/${maBai}`
+      `/BaiHoc/chi-tiet/${maBai}`,
+      `/baihoc/${maBai}`,
+      `/baihoc/chi-tiet/${maBai}`
     ]);
   }
 
   async getReadingDocDetail(maBaiDoc: string): Promise<ReadingDocDetailResponse> {
+    // Backend canonical: GET /api/BaiDoc/{maBaiDoc}
     const res = await this.requestWithFallback<any>([
-      `/BaiDoc/chi-tiet/${maBaiDoc}`,
       `/BaiDoc/${maBaiDoc}`,
-      `/baidoc/chi-tiet/${maBaiDoc}`,
-      `/baidoc/${maBaiDoc}`
+      `/BaiDoc/chi-tiet/${maBaiDoc}`,
+      `/baidoc/${maBaiDoc}`,
+      `/baidoc/chi-tiet/${maBaiDoc}`
     ]);
     return res?.data ?? res;
   }
 
   async getListeningDetail(maBaiNghe: string): Promise<ListeningDocDetail> {
+    // Backend canonical: GET /api/BaiNghe/{maBaiNghe}
     const res: any = await this.requestWithFallback<any>([
+      `/BaiNghe/${maBaiNghe}`,
       `/BaiNghe/chi-tiet/${maBaiNghe}`,
       `/BaiNghe/chi-tiet?maBaiNghe=${encodeURIComponent(maBaiNghe)}`,
-      `/BaiNghe/${maBaiNghe}`,
+      `/bainghe/${maBaiNghe}`,
       `/bainghe/chi-tiet/${maBaiNghe}`,
-      `/bainghe/chi-tiet?maBaiNghe=${encodeURIComponent(maBaiNghe)}`,
-      `/bainghe/${maBaiNghe}`
+      `/bainghe/chi-tiet?maBaiNghe=${encodeURIComponent(maBaiNghe)}`
     ]);
     // Unwrap common response envelopes and arrays
     const data = (res && typeof res === 'object') ? (res.data ?? res) : res;
@@ -678,24 +786,28 @@ export class ApiService {
     // Send a permissive payload for compatibility across endpoints
     const body = JSON.stringify({ email, matKhau, password: matKhau, passwordHash: matKhau, username: email });
     const candidates = [
-      // Env override first
+      // Only canonical backend endpoints to avoid accepting tokens from another legacy/auth service
       ...(LOGIN_PATH_ENV ? [LOGIN_PATH_ENV] : []),
-      // VN common
-      '/Auth/dang-nhap', '/NguoiDung/dang-nhap', '/TaiKhoan/dang-nhap', '/auth/dang-nhap',
-      '/Auth/dangnhap', '/NguoiDung/dangnhap', '/TaiKhoan/dangnhap', '/auth/dangnhap',
-      // English common
-      '/Auth/login', '/auth/login', '/Account/login', '/account/login', '/login', '/Login',
-      // Legacy in this repo
-      '/users/login', '/Users/login'
+      '/Auth/dang-nhap',
+      '/Auth/login'
     ];
     const res = await this.requestWithFallback<any>(candidates, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': '*/*' }, body });
 
     const token: string | undefined = res?.token ?? res?.data?.token;
     if (!token) throw new Error('Đăng nhập thất bại: thiếu token');
 
-    this.token = token;
-    localStorage.setItem('authToken', token);
+    const cleaned = String(token).replace(/^"+|"+$/g, '').trim();
+    this.token = cleaned;
+    localStorage.setItem('authToken', cleaned);
+    console.info('[API] stored token after login', token.slice(0, 16));
     if (res?.user) localStorage.setItem('currentUser', JSON.stringify(res.user));
+
+    // Basic JWT structure validation (3 parts). If it fails we treat token as invalid early.
+    const parts = cleaned.split('.');
+    if (parts.length !== 3) {
+      console.error('[API] token format invalid (expected 3 JWT parts)', cleaned);
+      throw new Error('Token không hợp lệ từ máy chủ. Vui lòng thử đăng nhập lại.');
+    }
 
     return { message: res?.message, token, user: res?.user } as AuthLoginResponse;
   }
@@ -728,8 +840,9 @@ export class ApiService {
     // - Secondary: PUT /NguoiDung/cap-nhat
     // - Tertiary: PATCH /NguoiDung/profile
     // - Last resort: POST /NguoiDung/cap-nhat (supported in backend)
+    // - New unified self endpoint: PUT /NguoiDung/me (updates profile + optional password)
     const endpointGroups = [
-      { method: 'PUT', endpoints: ['/NguoiDung/profile', '/NguoiDung/cap-nhat'] },
+      { method: 'PUT', endpoints: ['/NguoiDung/me', '/NguoiDung/profile', '/NguoiDung/cap-nhat'] },
       { method: 'PATCH', endpoints: ['/NguoiDung/profile'] },
       { method: 'POST', endpoints: ['/NguoiDung/cap-nhat'] },
     ];
@@ -766,6 +879,22 @@ export class ApiService {
       xacNhanMatKhauMoi: confirmationValue,
       confirmPassword: confirmationValue,
     });
+    // Try /me with PUT first, then fall back to dedicated change-password endpoints with POST
+    try {
+      return await this.request<any>('/NguoiDung/me', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Accept': '*/*' },
+        body,
+      });
+    } catch (e: any) {
+      if (e?.status !== 404 && e?.status !== 405) {
+        // If it's a 401/403/500, surface it; otherwise we will try fallbacks
+        // but keep behavior consistent with other calls and fall through on 405/404
+      } else {
+        // continue
+      }
+    }
+
     const candidates = [
       '/NguoiDung/doi-mat-khau',
       '/NguoiDung/change-password',
@@ -785,8 +914,16 @@ export class ApiService {
   }
 
   async adminListUsers(search?: string): Promise<{ users: AdminUser[]; total: number }> {
-    const query = search ? `?search=${encodeURIComponent(search)}` : '';
-    const response = await this.request<any>(`/NguoiDung${query}`, {
+    // Backend canonical: GET /api/NguoiDung?search=... (Admin only)
+    // Fallback: GET /api/Auth/admin/users (no search support)
+    const candidates: string[] = [];
+    if (search && search.trim().length > 0) {
+      candidates.push(`/NguoiDung?search=${encodeURIComponent(search.trim())}`);
+    }
+    candidates.push('/NguoiDung');
+    candidates.push('/Auth/admin/users');
+
+    const response = await this.requestWithFallback<any>(candidates, {
       method: 'GET',
       headers: { Accept: '*/*' },
     });
@@ -798,12 +935,23 @@ export class ApiService {
         : [];
 
     const total = typeof response?.total === 'number' ? response.total : rawItems.length;
-    const users = rawItems.map((item: any) => this.normalizeAdminUser(item));
+    const users = rawItems.map((item: any) => {
+      try {
+        return this.normalizeAdminUser(item);
+      } catch (err) {
+        console.warn('[ADMIN users] skip invalid payload item', item, err);
+        return null;
+      }
+    }).filter(Boolean) as AdminUser[];
     return { users, total };
   }
 
   async adminGetUser(maNd: string): Promise<AdminUser> {
-    const response = await this.request<any>(`/NguoiDung/${encodeURIComponent(maNd)}`, {
+    const candidates = [
+      `/NguoiDung/${encodeURIComponent(maNd)}`,
+      `/Auth/admin/users/${encodeURIComponent(maNd)}`
+    ];
+    const response = await this.requestWithFallback<any>(candidates, {
       method: 'GET',
       headers: { Accept: '*/*' },
     });
@@ -811,7 +959,8 @@ export class ApiService {
   }
 
   async adminCreateUser(payload: AdminUserCreatePayload): Promise<AdminUser> {
-    const response = await this.request<any>('/NguoiDung', {
+    const candidates = ['/NguoiDung'];
+    const response = await this.requestWithFallback<any>(candidates, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: '*/*' },
       body: JSON.stringify(payload),
@@ -820,7 +969,10 @@ export class ApiService {
   }
 
   async adminUpdateUser(maNd: string, payload: AdminUserUpdatePayload): Promise<AdminUser> {
-    const response = await this.request<any>(`/NguoiDung/${encodeURIComponent(maNd)}`, {
+    const candidates = [
+      `/NguoiDung/${encodeURIComponent(maNd)}`
+    ];
+    const response = await this.requestWithFallback<any>(candidates, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Accept: '*/*' },
       body: JSON.stringify(payload),
@@ -829,7 +981,10 @@ export class ApiService {
   }
 
   async adminDeleteUser(maNd: string): Promise<void> {
-    await this.request<void>(`/NguoiDung/${encodeURIComponent(maNd)}`, {
+    const candidates = [
+      `/NguoiDung/${encodeURIComponent(maNd)}`
+    ];
+    await this.requestWithFallback<void>(candidates, {
       method: 'DELETE',
       headers: { Accept: '*/*' },
     });

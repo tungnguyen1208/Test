@@ -24,6 +24,7 @@ import SpeakingChallengePage from "./pages/SpeakingChallengePage";
 import NotFound from "./pages/NotFound";
 import Day1IntroPage from "./pages/Day1IntroPage";
 import LessonOverviewPage from "./pages/LessonOverviewPage";
+import RoadmapLessonsPage from "./pages/RoadmapLessonsPage";
 import ReadingDocDetailPage from "./pages/ReadingDocDetailPage";
 import ListeningItemPage from "./pages/ListeningItemPage";
 import LoginPage from "./pages/LoginPage";
@@ -56,12 +57,12 @@ const App = () => (
           <Route
             path="/admin"
             element={(
-              <RequireAuth roles={["Admin"]} forbiddenRedirect="/dashboard">
+              <RequireAuth roles={["Admin"]} forbiddenRedirect="/">
                 <AdminDashboard />
               </RequireAuth>
             )}
           />
-          <Route path="/lesson/reading" element={<ReadingLessonPage />} />
+          <Route path="/lesson/reading/:lessonId?" element={<ReadingLessonPage />} />
           <Route path="/lesson/listening" element={<ListeningLessonPage />} />
           <Route path="/lesson/writing" element={<WritingLessonPage />} />
           <Route path="/lesson/conversation" element={<ConversationPracticePage />} />
@@ -88,6 +89,7 @@ const App = () => (
           {/* New learning flow */}
           <Route path="/day1-intro" element={<Day1IntroPage />} />
           <Route path="/lesson/overview/:maBai" element={<LessonOverviewPage />} />
+          <Route path="/roadmap/:maLoTrinh/:filter?" element={<RoadmapLessonsPage />} />
           <Route path="/reading-doc/:maBaiDoc" element={<ReadingDocDetailPage />} />
           <Route path="/listening-item/:maBaiNghe" element={<ListeningItemPage />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

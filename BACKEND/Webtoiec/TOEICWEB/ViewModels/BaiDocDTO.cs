@@ -1,9 +1,9 @@
 ﻿public class BaiDocDTO
 {
-    public string MaBaiDoc { get; set; }              // ma_bai_doc
-    public string MaBai { get; set; }                // ma_bai
-    public string TieuDe { get; set; }               // tieu_de
-    public string DoKho { get; set; }                // do_kho (Easy, Medium, Hard)
+    public string MaBaiDoc { get; set; } = string.Empty;
+    public string MaBai { get; set; } = string.Empty;
+    public string TieuDe { get; set; } = string.Empty;
+    public string DoKho { get; set; } = string.Empty;
     public DateTime? NgayTao { get; set; }           // ngay_tao
-    public string DuongDanFileTxt { get; set; }      // duong_dan_file_txt
+    public string DuongDanFileTxt { get; set; } = string.Empty;
 }

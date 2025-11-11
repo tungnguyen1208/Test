@@ -1,4 +1,4 @@
-import { Bell, Search, User } from "lucide-react";
+import { Bell, Search, User, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -8,8 +8,47 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/context/AuthContext";
 
 export function AdminHeader() {
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+  const displayName = ((): string => {
+    if (!user || typeof user !== 'object') return 'Admin';
+    const nameKeys = ['hoTen','HoTen','fullName','name','username'];
+    for (const k of nameKeys) {
+      const val = (user as any)[k];
+      if (typeof val === 'string' && val.trim()) return val.trim();
+    }
+    return 'Admin';
+  })();
+
+  const roleValue = ((): string => {
+    if (!user || typeof user !== 'object') return 'Admin';
+    const roleKeys = ['vaiTro','vai_tro','role','Role','VaiTro'];
+    for (const k of roleKeys) {
+      const val = (user as any)[k];
+      if (typeof val === 'string' && val.trim()) return val.trim();
+    }
+    return 'Admin';
+  })();
+
+  const initials = ((): string => {
+    const src = displayName;
+    const parts = src.split(/\s+/).filter(Boolean).slice(0,2);
+    return parts.map(p=>p[0]?.toUpperCase()).join('') || 'AD';
+  })();
+
+  const handleProfile = () => {
+    navigate('/profile');
+  };
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login', { replace: true });
+  };
+
   return (
     <header className="border-b bg-background px-6 py-3 flex items-center justify-between">
       <div className="flex items-center gap-4">
@@ -30,17 +69,20 @@ export function AdminHeader() {
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="flex items-center gap-2">
               <Avatar className="h-8 w-8">
-                <AvatarFallback>AD</AvatarFallback>
+                <AvatarFallback>{initials}</AvatarFallback>
               </Avatar>
-              <span className="hidden md:inline">Admin</span>
+              <span className="hidden md:inline">{roleValue}</span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={handleProfile}>
               <User className="mr-2 h-4 w-4" />
               Hồ sơ
             </DropdownMenuItem>
-            <DropdownMenuItem>Đăng xuất</DropdownMenuItem>
+            <DropdownMenuItem onClick={handleLogout} className="text-red-600 focus:text-red-600">
+              <LogOut className="mr-2 h-4 w-4" />
+              Đăng xuất
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

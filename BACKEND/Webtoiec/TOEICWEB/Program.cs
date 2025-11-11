@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using TOEICWEB.Data;
+using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -33,6 +34,35 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
         options.RequireHttpsMetadata = false;
         options.SaveToken = true;
+
+        // Add verbose diagnostics to understand why tokens are rejected (dev only)
+        options.Events = new JwtBearerEvents
+        {
+            OnAuthenticationFailed = ctx =>
+            {
+                Console.WriteLine($"[JWT] Authentication failed: {ctx.Exception.GetType().Name} - {ctx.Exception.Message}");
+                if (ctx.Request?.Headers?.ContainsKey("Authorization") == true)
+                {
+                    var header = ctx.Request.Headers["Authorization"].ToString();
+                    Console.WriteLine($"[JWT] Authorization header present, length={header.Length}");
+                }
+                return Task.CompletedTask;
+            },
+            OnChallenge = ctx =>
+            {
+                // Runs when a request is unauthorized
+                Console.WriteLine($"[JWT] Challenge triggered. Error={ctx.Error} Desc={ctx.ErrorDescription}");
+                return Task.CompletedTask;
+            },
+            OnTokenValidated = ctx =>
+            {
+                // Log the subject/nameid after successful validation
+                var nameId = ctx.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var email = ctx.Principal?.FindFirst(ClaimTypes.Email)?.Value;
+                Console.WriteLine($"[JWT] Token validated for user: nameid={nameId}, email={email}");
+                return Task.CompletedTask;
+            }
+        };
     });
 
 // ✅ Thêm Authorization
@@ -108,10 +138,30 @@ if (!app.Environment.IsDevelopment())
 // ✅ Sử dụng CORS (phải trước Authentication)
 app.UseCors("AllowFrontend"); // hoặc "AllowAll"
 
+// 🔎 Ghi log nhanh header Authorization trước khi vào Authentication để xác nhận client có gửi token
+app.Use(async (context, next) =>
+{
+    if (context.Request.Headers.TryGetValue("Authorization", out var auth))
+    {
+        var raw = auth.ToString();
+        var preview = raw.Length > 20 ? raw.Substring(0, 20) + "..." : raw;
+        Console.WriteLine($"[HTTP] Authorization header received: {preview}");
+    }
+    else
+    {
+        Console.WriteLine("[HTTP] No Authorization header on request " + context.Request.Path);
+    }
+    await next();
+});
+
 // ✅ Sử dụng Authentication & Authorization
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+
+// Ping endpoint (ẩn danh) để kiểm tra routing và CORS nhanh
+app.MapGet("/api/ping", () => Results.Ok(new { message = "pong", time = DateTime.UtcNow }))
+    .AllowAnonymous();
 
 app.Run();

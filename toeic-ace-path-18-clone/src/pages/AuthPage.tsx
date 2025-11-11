@@ -72,13 +72,20 @@ const AuthPage = ({ initialTab }: AuthPageProps) => {
   );
 
   const resolveRedirect = (role: string | null) => {
+    // Admin đi thẳng vào trang quản trị
     if (role === "admin") return "/admin";
+    // Không cho người dùng thường quay lại các trang bị hạn chế như /admin hoặc /dashboard
     const state = location.state as { from?: { pathname?: string } } | null;
     const fromPath = state?.from?.pathname;
     if (fromPath && fromPath !== "/login" && fromPath !== "/register") {
+      const lower = fromPath.toLowerCase();
+      if (lower.startsWith("/admin") || lower === "/dashboard") {
+        return "/"; // về trang chủ an toàn
+      }
       return fromPath;
     }
-    return "/dashboard";
+    // Mặc định: người dùng thường về trang chủ
+    return "/";
   };
 
   const handleLoginSubmit = async (event: React.FormEvent) => {
@@ -89,8 +96,10 @@ const AuthPage = ({ initialTab }: AuthPageProps) => {
     setLoginLoading(true);
     try {
       const response = await login(loginEmail.trim(), loginPassword.trim());
+      // Role may not be immediately available if profile endpoints are unauthorized; fallback to dashboard
       const role = resolveRole(response?.user);
-      navigate(resolveRedirect(role), { replace: true });
+      const target = resolveRedirect(role);
+      navigate(target, { replace: true });
     } catch (error: any) {
   setLoginError(error?.message || "Đăng nhập thất bại. Vui lòng thử lại.");
     } finally {
@@ -101,7 +110,8 @@ const AuthPage = ({ initialTab }: AuthPageProps) => {
   const authenticatedRole = resolveRole(user);
   const authenticatedRedirect = resolveRedirect(authenticatedRole);
 
-  if (isAuthenticated && location.pathname !== authenticatedRedirect) {
+  // If authenticated and already on /login or /register, force redirect (defensive)
+  if (isAuthenticated && (location.pathname === '/login' || location.pathname === '/register')) {
     return <Navigate to={authenticatedRedirect} replace />;
   }
 
@@ -259,7 +269,7 @@ const AuthPage = ({ initialTab }: AuthPageProps) => {
                     </div>
                     <div className="space-y-2">
                       <label className="text-sm font-medium" htmlFor="register-password">
-                        Mat khau
+                        Mật khẩu
                       </label>
                       <Input
                         id="register-password"

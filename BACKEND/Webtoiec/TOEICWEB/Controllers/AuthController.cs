@@ -386,5 +386,24 @@ namespace ToeicWeb.Controllers
                 return StatusCode(500, new { message = "Loi khi doi mat khau!", error = ex.Message });
             }
     }
+
+        // ✅ KIỂM TRA TOKEN & TRẢ VỀ CLAIMS (Debug hỗ trợ lỗi 401 Dashboard)
+        [Authorize]
+        [HttpGet("validate")]
+        public IActionResult ValidateToken()
+        {
+            var claims = User.Claims.Select(c => new { c.Type, c.Value }).ToList();
+            var nameId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var email = User.FindFirst(ClaimTypes.Email)?.Value;
+            var role = User.FindFirst("VaiTro")?.Value;
+            return Ok(new
+            {
+                message = "Token hợp lệ",
+                nameId,
+                email,
+                role,
+                claims
+            });
+        }
     }
 }

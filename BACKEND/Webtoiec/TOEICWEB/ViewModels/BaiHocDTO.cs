@@ -2,10 +2,10 @@
 {
     public class BaiHocDTO
     {
-        public string MaBai { get; set; }
-        public string MaLoTrinh { get; set; }
-        public string TenBai { get; set; }
-        public string MoTa { get; set; }
+        public string MaBai { get; set; } = string.Empty;
+        public string MaLoTrinh { get; set; } = string.Empty;
+        public string TenBai { get; set; } = string.Empty;
+        public string MoTa { get; set; } = string.Empty;
         public int ThoiLuongPhut { get; set; }
         public int SoThuTu { get; set; }
         public DateTime? NgayTao { get; set; }

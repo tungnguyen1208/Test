@@ -611,5 +611,132 @@ public class NguoiDungController : ControllerBase
             return StatusCode(500, new { message = "Loi khi doi mat khau!", error = ex.Message });
         }
     }
+
+    /// <summary>
+    /// Cập nhật thông tin cá nhân (self-service) và tùy chọn đổi mật khẩu trong một request.
+    /// PUT api/NguoiDung/me
+    /// </summary>
+    [Authorize]
+    [HttpPut("me")]
+    public async Task<IActionResult> UpdateSelf([FromBody] UpdateSelfVM model)
+    {
+        try
+        {
+            var maNdFromToken = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrWhiteSpace(maNdFromToken))
+            {
+                return Unauthorized(new { message = "Phiên đăng nhập không hợp lệ." });
+            }
+
+            var user = await _context.NguoiDungs.FirstOrDefaultAsync(u => u.MaNd == maNdFromToken);
+            if (user == null)
+            {
+                return NotFound(new { message = "Không tìm thấy người dùng." });
+            }
+
+            // Cập nhật họ tên
+            var newName = FirstNonEmpty(model.HoTen, model.FullName, model.Name);
+            if (!string.IsNullOrWhiteSpace(newName))
+            {
+                user.HoTen = newName.Trim();
+            }
+
+            // Cập nhật email (kiểm tra trùng và định dạng)
+            var newEmail = FirstNonEmpty(model.Email);
+            if (!string.IsNullOrWhiteSpace(newEmail) && !string.Equals(newEmail, user.Email, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!newEmail.Contains("@"))
+                {
+                    return BadRequest(new { message = "Email không hợp lệ." });
+                }
+                var exists = await _context.NguoiDungs.AnyAsync(u => u.Email == newEmail && u.MaNd != user.MaNd);
+                if (exists)
+                {
+                    return Conflict(new { message = "Email đã tồn tại." });
+                }
+                user.Email = newEmail.Trim();
+            }
+
+            // Cập nhật số điện thoại (cột so_dien_thoai)
+            var newPhone = FirstNonEmpty(model.SoDienThoai, model.Phone);
+            if (newPhone != null || model.SoDienThoai != null || model.Phone != null)
+            {
+                var conn = _context.Database.GetDbConnection();
+                var wasClosed = conn.State != ConnectionState.Open;
+                try
+                {
+                    if (wasClosed) await conn.OpenAsync();
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText = "UPDATE nguoi_dung SET so_dien_thoai = @phone WHERE ma_nd = @ma";
+                    var pPhone = cmd.CreateParameter();
+                    pPhone.ParameterName = "@phone";
+                    pPhone.Value = string.IsNullOrWhiteSpace(newPhone) ? DBNull.Value : newPhone!;
+                    cmd.Parameters.Add(pPhone);
+                    var pMa = cmd.CreateParameter();
+                    pMa.ParameterName = "@ma";
+                    pMa.Value = user.MaNd;
+                    cmd.Parameters.Add(pMa);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+                finally
+                {
+                    if (wasClosed && conn.State == ConnectionState.Open)
+                        await conn.CloseAsync();
+                }
+            }
+
+            // Cập nhật avatar
+            var newAvatar = FirstNonEmpty(model.AnhDaiDien, model.AvatarUrl, model.Avatar);
+            if (newAvatar != null || model.AnhDaiDien != null || model.AvatarUrl != null || model.Avatar != null)
+            {
+                user.AnhDaiDien = string.IsNullOrWhiteSpace(newAvatar) ? null : newAvatar;
+            }
+
+            // Đổi mật khẩu nếu có đủ tham số
+            var currentPassword = FirstNonEmpty(model.MatKhauHienTai, model.MatKhauCu, model.CurrentPassword);
+            var newPassword = FirstNonEmpty(model.MatKhauMoi, model.NewPassword);
+            var confirmPassword = FirstNonEmpty(model.XacNhanMatKhauMoi, model.ConfirmPassword);
+            if (!string.IsNullOrWhiteSpace(currentPassword) || !string.IsNullOrWhiteSpace(newPassword) || !string.IsNullOrWhiteSpace(confirmPassword))
+            {
+                if (string.IsNullOrWhiteSpace(currentPassword) || string.IsNullOrWhiteSpace(newPassword) || string.IsNullOrWhiteSpace(confirmPassword))
+                {
+                    return BadRequest(new { message = "Thiếu tham số đổi mật khẩu." });
+                }
+                if (!string.Equals(newPassword, confirmPassword))
+                {
+                    return BadRequest(new { message = "Xác nhận mật khẩu không khớp." });
+                }
+                if (!string.Equals(user.MatKhau, currentPassword))
+                {
+                    return BadRequest(new { message = "Mật khẩu hiện tại không đúng." });
+                }
+                if (newPassword.Length < 6)
+                {
+                    return BadRequest(new { message = "Mật khẩu mới phải ít nhất 6 ký tự." });
+                }
+                user.MatKhau = newPassword.Trim();
+            }
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = "Cập nhật thành công.",
+                user = new
+                {
+                    ma_nd = user.MaNd,
+                    email = user.Email,
+                    ho_ten = user.HoTen,
+                    so_dien_thoai = newPhone,
+                    vai_tro = user.VaiTro,
+                    anh_dai_dien = user.AnhDaiDien
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "Lỗi khi cập nhật thông tin.", error = ex.Message });
+        }
+    }
 }
 

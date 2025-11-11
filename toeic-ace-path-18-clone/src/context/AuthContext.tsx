@@ -37,6 +37,53 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem("authToken"));
   const [loading, setLoading] = useState(true);
 
+  // Decode base64url JWT payload safely
+  const decodeJwtPayload = useCallback((jwt?: string): any | null => {
+    if (!jwt) return null;
+    try {
+      const parts = jwt.split('.');
+      if (parts.length !== 3) return null;
+      const normalized = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+      // atob returns a Latin1 string; convert to proper UTF-8 so tiếng Việt giữ nguyên dấu
+      const binary = atob(padded);
+      const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+      const utf8 = new TextDecoder('utf-8').decode(bytes);
+      return JSON.parse(utf8);
+    } catch {
+      return null;
+    }
+  }, []);
+
+  // Map common .NET JWT claim keys to our user shape
+  const synthesizeUserFromClaims = useCallback((claims: any): AuthUser | null => {
+    if (!claims || typeof claims !== 'object') return null;
+    // Typical .NET claim keys
+    const k = {
+      nameId: claims['nameid'] || claims['sub'] || claims['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'] || claims['MaNd'] || claims['maNd'],
+      email: claims['email'] || claims['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress'],
+      name: claims['HoTen'] || claims['hoTen'] || claims['name'] || claims['unique_name'] || claims['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'],
+      role: claims['VaiTro'] || claims['vaiTro'] || claims['role'] || claims['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'],
+      avatar: claims['AnhDaiDien'] || claims['anhDaiDien'] || claims['avatar']
+    };
+    const synthesized: AuthUser = {
+      maNd: k.nameId ?? null,
+      MaNd: k.nameId ?? null,
+      email: k.email ?? null,
+      hoTen: k.name ?? null,
+      HoTen: k.name ?? null,
+      vaiTro: k.role ?? null,
+      VaiTro: k.role ?? null,
+      anhDaiDien: k.avatar ?? null,
+      AnhDaiDien: k.avatar ?? null,
+      // raw claims for debugging
+      _claims: claims,
+    };
+    // Require at least an identifier or email to consider valid
+    if (!synthesized.maNd && !synthesized.email) return null;
+    return synthesized;
+  }, []);
+
   const clearSession = useCallback(() => {
     apiService.logout();
     setToken(null);
@@ -44,7 +91,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     setLoading(false);
   }, []);
 
-  const refreshProfile = useCallback(async () => {
+  const refreshProfile = useCallback(async (options?: { suppressUnauthorized?: boolean }) => {
     try {
       if (!localStorage.getItem("authToken")) return null;
       const remote = await apiService.getProfile();
@@ -56,13 +103,24 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       return remoteUser;
     } catch (err) {
       const maybeError = err as any;
-      if (maybeError?.status === 401 || maybeError?.status === 403) {
-        clearSession();
+      // Do not clear session on profile 401 immediately; backend may not support one of the probe endpoints.
+      if (!options?.suppressUnauthorized && (maybeError?.status === 401 || maybeError?.status === 403)) {
+        console.debug('[Auth] profile fetch unauthorized, preserving session');
+      }
+      // Fallback: synthesize user from JWT claims so UI can proceed
+      const stored = (localStorage.getItem('authToken') || '').replace(/^"+|"+$/g, '').trim();
+      const claims = decodeJwtPayload(stored);
+      const synthetic = synthesizeUserFromClaims(claims);
+      if (synthetic) {
+        setUser(synthetic);
+        localStorage.setItem('currentUser', JSON.stringify(synthetic));
+        console.debug('[Auth] using synthetic user from JWT claims');
+        return synthetic;
       }
       // Swallow: we can still use cached user
       return null;
     }
-  }, [clearSession]);
+  }, [clearSession, decodeJwtPayload, synthesizeUserFromClaims]);
 
   useEffect(() => {
     const storedToken = localStorage.getItem("authToken");
@@ -96,10 +154,20 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     try {
       const response = await apiService.authLogin(email, password);
       const nextToken = response.token;
-      setToken(nextToken);
-      // Immediately fetch canonical profile from backend
-      const fetched = await refreshProfile();
-      const nextUser = fetched ?? response.user ?? getStoredUser();
+      const cleaned = String(nextToken || '').replace(/^"+|"+$/g, '').trim();
+      setToken(cleaned);
+      localStorage.setItem('authToken', cleaned);
+      // Debug decode minimal JWT header/payload if available
+      try {
+        const payload = decodeJwtPayload(cleaned);
+        if (payload) console.debug('[Auth] JWT payload', payload);
+      } catch {}
+      // Immediately fetch canonical profile from backend (non-blocking)
+      const fetched = await refreshProfile({ suppressUnauthorized: true });
+      const nextUser = fetched ?? response.user ?? (() => {
+        const claims = decodeJwtPayload(cleaned);
+        return synthesizeUserFromClaims(claims) ?? getStoredUser();
+      })();
       setUser(nextUser ?? null);
       return {
         ...response,
@@ -110,7 +178,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     } finally {
       setLoading(false);
     }
-  }, [refreshProfile]);
+  }, [refreshProfile, decodeJwtPayload, synthesizeUserFromClaims]);
 
   const logout = useCallback(() => {
     clearSession();

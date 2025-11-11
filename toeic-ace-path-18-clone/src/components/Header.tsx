@@ -25,13 +25,15 @@ const Header = () => {
       { label: "Trang chủ", to: "/" },
       { label: "Đánh giá trình độ", to: "/assessment" },
       { label: "Lộ trình học", to: "/study-plan" },
-      { label: "Dashboard", to: "/dashboard" },
+      { label: "Tiến độ học tập", to: "/dashboard" },
       // { label: "Tất cả trang", to: "/all-interfaces" },
     ],
     []
   );
 
+  // Ưu tiên họ tên có dấu từ claims backend (HoTen/hoTen), fallback các biến thể khác
   const fullName =
+    (user?.HoTen as string) ||
     (user?.hoTen as string) ||
     (user?.fullName as string) ||
     (user?.name as string) ||

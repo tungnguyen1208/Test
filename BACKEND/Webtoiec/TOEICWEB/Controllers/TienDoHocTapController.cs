@@ -38,10 +38,10 @@ namespace ToeicWeb.Controllers
                         (t, b) => new TienDoHocTapDTO
                         {
                             MaTienDo = t.MaTienDo,
-                            MaBai = t.MaBai,
-                            TenBai = b.TenBai,
+                            MaBai = t.MaBai ?? string.Empty,
+                            TenBai = b.TenBai ?? string.Empty,
                             MaLoTrinh = b.MaLoTrinh,
-                            TrangThai = t.TrangThai,
+                            TrangThai = t.TrangThai ?? string.Empty,
                             NgayHoanThanh = t.NgayHoanThanh,
                             NgayCapNhat = t.NgayCapNhat,
                             ThoiGianHocPhut = t.ThoiGianHocPhut ?? 0,
@@ -91,10 +91,10 @@ namespace ToeicWeb.Controllers
                     .Select(t => new TienDoHocTapDTO
                     {
                         MaTienDo = t.MaTienDo,
-                        MaBai = t.MaBai,
-                        TenBai = baiHoc.TenBai,
+                        MaBai = t.MaBai ?? string.Empty,
+                        TenBai = baiHoc.TenBai ?? string.Empty,
                         MaLoTrinh = baiHoc.MaLoTrinh,
-                        TrangThai = t.TrangThai,
+                        TrangThai = t.TrangThai ?? string.Empty,
                         NgayHoanThanh = t.NgayHoanThanh,
                         NgayCapNhat = t.NgayCapNhat,
                         ThoiGianHocPhut = t.ThoiGianHocPhut ?? 0,

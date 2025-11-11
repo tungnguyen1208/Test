@@ -1,269 +1,361 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { apiService, type LessonItem, type ReadingDocDetailResponse } from "@/services/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Label } from "@/components/ui/label";
-import { useToast } from "@/hooks/use-toast";
-import { 
-  Clock,
-  BookOpen,
-  CheckCircle,
-  Target,
-  ChevronLeft,
-  Send,
-  Brain
-} from "lucide-react";
+import { ChevronLeft, BookOpen, Clock } from "lucide-react";
 
-const ReadingLesson = () => {
-  const [selectedAnswers, setSelectedAnswers] = useState<string[]>([]);
-  const [isSubmitted, setIsSubmitted] = useState(false);
-  const [currentQuestion, setCurrentQuestion] = useState(0);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+interface QuizQuestion {
+  id: string;
+  text: string;
+  options: { key: string; text: string }[];
+  correctKey: string;
+  explanation?: string | null;
+}
+
+interface ReadingLessonProps {
+  lessonId?: string | null;
+}
+
+const formatDuration = (seconds?: number | null): string => {
+  if (!seconds || Number.isNaN(seconds)) return "";
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  if (mins <= 0) return `${secs}s`;
+  return `${mins} phút${secs ? ` ${secs}s` : ""}`;
+};
+
+const ReadingLesson = ({ lessonId }: ReadingLessonProps) => {
   const navigate = useNavigate();
-  const { toast } = useToast();
 
-  const readingPassage = `
-    Dear Ms. Johnson,
+  const [resolvedLessonId, setResolvedLessonId] = useState<string | null>(lessonId ?? null);
+  const [lesson, setLesson] = useState<LessonItem | null>(null);
+  const [docDetail, setDocDetail] = useState<ReadingDocDetailResponse | null>(null);
+  const [questions, setQuestions] = useState<QuizQuestion[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
-    We are pleased to inform you that your application for the position of Marketing Manager at Global Tech Solutions has been accepted. Your first day of work will be Monday, March 15th, at 9:00 AM.
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [selectedOption, setSelectedOption] = useState<string | null>(null);
+  const [showExplanation, setShowExplanation] = useState(false);
+  const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const [score, setScore] = useState(0);
+  const [answeredState, setAnsweredState] = useState<Record<number, { evaluated: boolean; isCorrect: boolean }>>({});
 
-    Please report to the Human Resources office on the 5th floor. You will need to bring the following documents:
-    - A copy of your passport or driver's license
-    - Your signed employment contract
-    - Two passport-sized photographs
+  // Update when page param/prop changes
+  useEffect(() => {
+    setResolvedLessonId(lessonId ?? null);
+  }, [lessonId]);
 
-    Your supervisor, Mr. Chen, will meet you at 10:00 AM to discuss your initial responsibilities and introduce you to the team. The orientation program will last for three days, covering company policies, procedures, and your specific job duties.
-
-    We look forward to working with you and are confident that you will be a valuable addition to our team.
-
-    Best regards,
-    Sarah Williams
-    HR Director
-  `;
-
-  const questions = [
-    {
-      id: 1,
-      question: "What position has Ms. Johnson been offered?",
-      options: [
-        "HR Director",
-        "Marketing Manager", 
-        "Sales Representative",
-        "Technical Support"
-      ],
-      correct: 1
-    },
-    {
-      id: 2,
-      question: "When should Ms. Johnson start work?",
-      options: [
-        "Monday, March 15th",
-        "Tuesday, March 16th",
-        "March 15th at 10:00 AM",
-        "The orientation day"
-      ],
-      correct: 0
-    },
-    {
-      id: 3,
-      question: "Where should Ms. Johnson report on her first day?",
-      options: [
-        "Mr. Chen's office",
-        "The Marketing Department",
-        "The Human Resources office on the 5th floor",
-        "The main reception"
-      ],
-      correct: 2
-    }
-  ];
-
-  const handleAnswerSelect = (questionIndex: number, value: string) => {
-    const newAnswers = [...selectedAnswers];
-    newAnswers[questionIndex] = value;
-    setSelectedAnswers(newAnswers);
-  };
-
-  const handleSubmit = async () => {
-    setIsSubmitted(true);
-    setIsAnalyzing(true);
-    
-    // Prepare answers with correctness
-    const answers = questions.map((question, index) => ({
-      questionId: question.id,
-      selectedAnswer: parseInt(selectedAnswers[index] || "-1"),
-      correctAnswer: question.correct,
-      isCorrect: parseInt(selectedAnswers[index] || "-1") === question.correct,
-      question: question.question,
-      options: question.options
-    }));
-
-    // Simulate processing time
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    toast({
-      title: "Đang gửi kết quả cho AI...",
-      description: "AI đang phân tích bài làm của bạn",
-    });
-
-    // Auto navigate to AI assessment
-    navigate('/ai-assessment', {
-      state: {
-        lessonType: 'reading',
-        score: Math.round((answers.filter(a => a.isCorrect).length / answers.length) * 100),
-        answers,
-        exerciseData: {
-          passage: readingPassage,
-          lessonTitle: "Reading Comprehension - Business Letter",
-          timeSpent: "~15 phút",
-          difficulty: "Trung bình"
+  // If no lessonId provided, fallback to first lesson
+  useEffect(() => {
+    if (resolvedLessonId) return;
+    let ignore = false;
+    (async () => {
+      try {
+        setLoading(true);
+        const res = await apiService.getLessons();
+        if (ignore) return;
+        const candidate = res.data?.find(item => (item.baiDocs?.length ?? 0) > 0) ?? res.data?.[0];
+        setResolvedLessonId(candidate?.maBai ?? null);
+      } catch (err) {
+        if (!ignore) {
+          setError(err instanceof Error ? err.message : "Không thể tải danh sách bài học");
         }
+      } finally {
+        if (!ignore) setLoading(false);
       }
-    });
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [resolvedLessonId]);
+
+  // Fetch lesson detail
+  useEffect(() => {
+    if (!resolvedLessonId) return;
+    let ignore = false;
+    (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const detail = await apiService.getLessonDetail(resolvedLessonId);
+        if (ignore) return;
+        const lessonData = detail?.data ?? (detail as any)?.data ?? detail;
+        setLesson(lessonData);
+        const docCandidate = lessonData?.baiDocs?.[0];
+        if (docCandidate?.maBaiDoc) {
+          const doc = await apiService.getReadingDocDetail(docCandidate.maBaiDoc);
+          if (!ignore) {
+            setDocDetail(doc);
+          }
+        } else {
+          setDocDetail(null);
+        }
+      } catch (err) {
+        if (!ignore) {
+          setError(err instanceof Error ? err.message : "Không thể tải dữ liệu bài học");
+          setLesson(null);
+          setDocDetail(null);
+        }
+      } finally {
+        if (!ignore) setLoading(false);
+      }
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [resolvedLessonId]);
+
+  // Map reading questions
+  useEffect(() => {
+    if (!docDetail?.cauHois?.length) {
+      setQuestions([]);
+      setCurrentIndex(0);
+      setSelectedOption(null);
+      setShowExplanation(false);
+      setIsCorrect(null);
+      setScore(0);
+      return;
+    }
+
+    const mapped: QuizQuestion[] = docDetail.cauHois
+      .map((item) => {
+        const options = (item.dapAns ?? []).map((answer) => ({
+          key: answer.nhanDapAn || String(answer.maDapAn ?? ""),
+          text: answer.noiDungDapAn || "",
+        }));
+        const correctKey = (item.dapAns ?? []).find((answer) => answer.laDapAnDung)?.nhanDapAn ?? "";
+        return {
+          id: item.maCauHoi,
+          text: item.noiDungCauHoi,
+          options,
+          correctKey,
+          explanation: item.giaiThich ?? null,
+        };
+      })
+      .filter((q) => q.text && q.options.length >= 2 && q.correctKey);
+
+    setQuestions(mapped);
+    setCurrentIndex(0);
+    setSelectedOption(null);
+    setShowExplanation(false);
+    setIsCorrect(null);
+    setScore(0);
+  }, [docDetail]);
+
+  const currentQuestion = questions[currentIndex];
+  const totalQuestions = questions.length;
+  const progressPercent = totalQuestions > 0 ? ((currentIndex + 1) / totalQuestions) * 100 : 0;
+
+  const handleSelectOption = (key: string) => {
+    if (showExplanation) return; // khóa lựa chọn sau khi đã xem đáp án
+    setSelectedOption(key);
+    setShowExplanation(false);
+    setIsCorrect(null);
   };
+
+  const evaluateCurrentQuestion = (displayExplanation: boolean): boolean | null => {
+    if (!currentQuestion || !selectedOption) {
+      if (displayExplanation) {
+        setShowExplanation(true);
+        setIsCorrect(false);
+      }
+      return null;
+    }
+
+    const previouslyAnswered = answeredState[currentIndex];
+    const result = selectedOption === currentQuestion.correctKey;
+
+    if (!previouslyAnswered?.evaluated) {
+      if (result) {
+        setScore((prev) => prev + 1);
+      }
+      setAnsweredState((prev) => ({
+        ...prev,
+        [currentIndex]: { evaluated: true, isCorrect: result },
+      }));
+    }
+
+    const finalResult = previouslyAnswered?.evaluated ? previouslyAnswered.isCorrect : result;
+
+    if (displayExplanation) {
+      setIsCorrect(finalResult);
+      setShowExplanation(true);
+    } else {
+      setIsCorrect(null);
+      setShowExplanation(false);
+    }
+
+    return finalResult;
+  };
+
+  const handleCheckAnswer = () => {
+    evaluateCurrentQuestion(true);
+  };
+
+  const handleNextQuestion = () => {
+    // Đánh giá câu hiện tại (nếu chưa đánh giá)
+    evaluateCurrentQuestion(false);
+
+    if (currentIndex < totalQuestions - 1) {
+      setCurrentIndex((prev) => prev + 1);
+      setSelectedOption(null);
+      setShowExplanation(false);
+      setIsCorrect(null);
+    }
+  };
+
+  const lessonTag = lesson?.maLoTrinh || "Lesson";
+  const docVideoUrl =
+    docDetail?.duongDanFileTxt && /^https?:\/\//i.test(docDetail.duongDanFileTxt)
+      ? docDetail.duongDanFileTxt
+      : null;
+  const videoUrl = lesson?.videos?.[0]?.duongDanVideo || docVideoUrl;
+  const videoDurationLabel = formatDuration(lesson?.videos?.[0]?.thoiLuongGiay);
+  const readingPassage = docDetail?.noiDung || docDetail?.duongDanFileTxt || "";
+
+  if (loading) {
+    return <div className="p-6 text-center text-sm text-slate-500">Đang tải bài học...</div>;
+  }
+
+  if (error) {
+    return <div className="p-6 text-center text-red-600">{error}</div>;
+  }
+
+  if (!lesson) return null;
 
   return (
-    <div className="min-h-screen bg-background py-8">
-      <div className="container mx-auto px-6 max-w-6xl">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center space-x-4">
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={() => navigate('/study-plan')}
-            >
-              <ChevronLeft className="w-4 h-4 mr-2" />
-              Quay lại lộ trình
-            </Button>
-            <div>
-              <h1 className="text-2xl font-bold text-toeic-navy">Reading Comprehension</h1>
-              <p className="text-muted-foreground">Day 2 - Business Letter</p>
-            </div>
-          </div>
-          <div className="flex items-center space-x-4">
-            <Badge className="bg-toeic-success">
-              <BookOpen className="w-3 h-3 mr-1" />
-              Reading
-            </Badge>
-            <div className="flex items-center text-sm text-muted-foreground">
-              <Clock className="w-4 h-4 mr-1" />
-              15 phút
-            </div>
-          </div>
+    <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
+      <section className="bg-white rounded-2xl shadow-lg shadow-slate-200/60 border border-slate-200 p-6 border-l-4 border-l-blue-600">
+        <div className="flex items-center justify-between mb-3">
+          <button
+            type="button"
+            className="text-sm text-slate-500 hover:text-blue-600 transition-colors flex items-center gap-1"
+            onClick={() => navigate(-1)}
+          >
+            <ChevronLeft className="w-4 h-4" /> Quay lại
+          </button>
+          <span className="text-xs font-semibold text-blue-600 bg-blue-50 rounded-full px-3 py-1">
+            {lessonTag}
+          </span>
         </div>
+        <h1 className="text-2xl font-extrabold text-slate-900">{lesson.tenBai}</h1>
+        {lesson.moTa && <p className="mt-2 text-sm text-slate-500">{lesson.moTa}</p>}
+      </section>
 
-        {/* Progress */}
-        <Card className="mb-6">
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium">Tiến trình bài học</span>
-              <span className="text-sm text-muted-foreground">
-                {currentQuestion + 1}/{questions.length} câu hỏi
-              </span>
+      <section className="bg-white rounded-2xl shadow-lg shadow-slate-200/60 border border-slate-200 p-6 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-base font-semibold text-slate-900 flex items-center gap-2">
+            <BookOpen className="w-4 h-4" /> Nội dung bài học
+          </span>
+          {(videoDurationLabel || docDetail?.doKho) && (
+            <span className="text-xs text-slate-500 flex items-center gap-2">
+              {videoDurationLabel && (
+                <span className="flex items-center gap-1">
+                  <Clock className="w-3 h-3" /> {videoDurationLabel}
+                </span>
+              )}
+              {docDetail?.doKho && (
+                <Badge variant="outline" className="text-[10px]">
+                  {docDetail.doKho}
+                </Badge>
+              )}
+            </span>
+          )}
+        </div>
+        {videoUrl ? (
+          <div className="rounded-xl overflow-hidden border border-slate-200 bg-gradient-to-tr from-sky-100 to-blue-50">
+            <div className="relative pt-[56.25%]">
+              <iframe
+                src={videoUrl}
+                title={lesson.tenBai}
+                className="absolute inset-0 w-full h-full"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              />
             </div>
-            <Progress value={((currentQuestion + 1) / questions.length) * 100} className="h-2" />
-          </CardContent>
-        </Card>
+          </div>
+        ) : readingPassage ? (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 whitespace-pre-line">
+            {readingPassage}
+          </div>
+        ) : (
+          <p className="text-sm text-slate-500">Chưa có nội dung hiển thị.</p>
+        )}
+      </section>
 
-        <div className="grid lg:grid-cols-2 gap-8">
-          {/* Reading Passage */}
-          <Card className="h-fit">
-            <CardHeader>
-              <CardTitle className="text-lg text-toeic-navy">Đoạn văn</CardTitle>
-              <CardDescription>
-                Đọc kỹ đoạn văn sau và trả lời các câu hỏi bên cạnh
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="prose prose-sm max-w-none">
-                <div className="bg-muted/30 p-4 rounded-lg border">
-                  <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
-                    {readingPassage}
-                  </pre>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+      {currentQuestion ? (
+        <section className="bg-white rounded-2xl shadow-lg shadow-slate-200/60 border border-slate-200 border-t-4 border-t-blue-600 p-6">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-base font-semibold text-slate-900">Bài tập</span>
+            <span className="text-xs text-slate-500">
+              Câu {currentIndex + 1}/{totalQuestions}
+            </span>
+          </div>
+          <Progress value={progressPercent} className="h-2 mb-4" />
+          <p className="font-semibold mb-4 text-slate-900">{currentQuestion.text}</p>
+          <div className="flex flex-col gap-2 mb-4">
+            {currentQuestion.options.map((opt) => {
+              const isSelected = selectedOption === opt.key;
+              const isOptionCorrect = showExplanation && opt.key === currentQuestion.correctKey;
+              const isWrongSelected = showExplanation && isSelected && opt.key !== currentQuestion.correctKey;
 
-          {/* Questions */}
-          <div className="space-y-6">
-            {questions.map((question, questionIndex) => (
-              <Card key={question.id}>
-                <CardHeader>
-                  <CardTitle className="text-base text-toeic-navy">
-                    Câu {questionIndex + 1}: {question.question}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <RadioGroup
-                    value={selectedAnswers[questionIndex] || ""}
-                    onValueChange={(value) => handleAnswerSelect(questionIndex, value)}
-                    disabled={isSubmitted}
-                  >
-                    {question.options.map((option, optionIndex) => (
-                      <div key={optionIndex} className="flex items-center space-x-2">
-                        <RadioGroupItem 
-                          value={optionIndex.toString()} 
-                          id={`q${questionIndex}_${optionIndex}`}
-                        />
-                        <Label 
-                          htmlFor={`q${questionIndex}_${optionIndex}`}
-                          className="cursor-pointer flex-1"
-                        >
-                          {String.fromCharCode(65 + optionIndex)}. {option}
-                        </Label>
-                        {isSubmitted && optionIndex === question.correct && (
-                          <CheckCircle className="w-4 h-4 text-toeic-success" />
-                        )}
-                      </div>
-                    ))}
-                  </RadioGroup>
-                </CardContent>
-              </Card>
-            ))}
+              let optionClasses = "flex items-center gap-3 px-3 py-2 rounded-xl border text-sm cursor-pointer transition";
+              if (isOptionCorrect) optionClasses += " border-green-500 bg-green-50 text-green-900";
+              else if (isWrongSelected) optionClasses += " border-red-500 bg-red-50 text-red-900";
+              else if (isSelected) optionClasses += " border-blue-600 bg-blue-50 text-slate-900";
+              else optionClasses += " border-slate-200 text-slate-800 hover:border-blue-500 hover:bg-blue-50";
 
-            {/* Submit Button */}
-            <div className="flex justify-center pt-4">
-              {!isSubmitted ? (
-                <Button 
-                  onClick={handleSubmit}
-                  disabled={selectedAnswers.length < questions.length}
-                  variant="hero"
-                  size="lg"
-                >
-                  <Send className="w-4 h-4 mr-2" />
-                  Nộp bài và nhận đánh giá AI
+              return (
+                <label key={opt.key} className={optionClasses}>
+                  <input
+                    type="radio"
+                    name={`question-${currentQuestion.id}`}
+                    value={opt.key}
+                    checked={isSelected}
+                    onChange={() => handleSelectOption(opt.key)}
+                    className="h-4 w-4 accent-blue-600"
+                  />
+                  <span className="text-sm">
+                    <strong className="mr-1">{opt.key}.</strong>
+                    {opt.text}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <div className="flex gap-2">
+              <Button onClick={handleCheckAnswer} className="rounded-full px-4">
+                Kiểm tra đáp án
+              </Button>
+              {currentIndex < totalQuestions - 1 && (
+                <Button type="button" variant="outline" className="rounded-full" onClick={handleNextQuestion}>
+                  Câu tiếp theo
                 </Button>
-              ) : isAnalyzing ? (
-                <div className="text-center space-y-4">
-                  <div className="flex items-center justify-center space-x-2 text-primary">
-                    <Brain className="w-5 h-5 animate-pulse" />
-                    <span className="font-medium">Đang gửi cho AI phân tích...</span>
-                  </div>
-                  <Progress value={75} className="w-64 mx-auto" />
-                </div>
-              ) : (
-                <div className="text-center space-y-4">
-                  <div className="flex items-center justify-center space-x-2 text-toeic-success">
-                    <CheckCircle className="w-5 h-5" />
-                    <span className="font-medium">Đã hoàn thành bài học!</span>
-                  </div>
-                  <Button 
-                    variant="hero"
-                    onClick={() => navigate('/lesson/listening')}
-                  >
-                    <Target className="w-4 h-4 mr-2" />
-                    Tiếp tục học bài tiếp theo
-                  </Button>
-                </div>
               )}
             </div>
+            <span className="text-xs text-slate-500">Điểm: {score}/{totalQuestions}</span>
           </div>
-        </div>
-      </div>
+          {showExplanation && (
+            <div
+              className={`mt-2 rounded-xl border-l-4 px-4 py-3 text-sm ${
+                isCorrect ? "border-l-green-600 bg-green-50 text-green-900" : "border-l-red-600 bg-red-50 text-red-900"
+              }`}
+            >
+              <p className="font-semibold mb-1">Giải thích:</p>
+              <p>{currentQuestion.explanation || "Chưa có giải thích chi tiết."}</p>
+            </div>
+          )}
+        </section>
+      ) : (
+        <section className="bg-white rounded-2xl shadow border border-slate-200 p-6 text-sm text-slate-500">
+          Bài học này chưa có câu hỏi đọc hiểu. Vui lòng quay lại sau.
+        </section>
+      )}
     </div>
   );
 };
